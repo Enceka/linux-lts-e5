@@ -448,10 +448,11 @@ bool sipa_dummy_set_rps_mode(int rps_mode)
 
 	/*
 	 * in kernel5.15 default_attrs in not initialized,
-	 * it replaced by attrs in default_groups
+	 * it replaced by attrs in default_groups; on 6.18 the rx queue's
+	 * ktype has no groups at all: the queue holds them
 	 */
-	attr = (*kobj->ktype->default_groups)->attrs;
-	if (!attr) {
+	attr = queue->groups && *queue->groups ? (*queue->groups)->attrs : NULL;
+	if (!attr || !attr[0]) {
 		pr_err("attr is null\n");
 		return false;
 	}
@@ -496,10 +497,11 @@ bool sipa_dummy_set_rps_cpus(u8 rps_cpus)
 
 	/*
 	 * in kernel5.15 default_attrs in not initialized,
-	 * it replaced by attrs in default_groups
+	 * it replaced by attrs in default_groups; on 6.18 the rx queue's
+	 * ktype has no groups at all: the queue holds them
 	 */
-	attr = (*kobj->ktype->default_groups)->attrs;
-	if (!attr) {
+	attr = queue->groups && *queue->groups ? (*queue->groups)->attrs : NULL;
+	if (!attr || !attr[0]) {
 		pr_err("attr is null\n");
 		return false;
 	}
