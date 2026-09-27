@@ -235,7 +235,7 @@ int gsp_layer_dmabuf_map(struct gsp_layer *layer, struct device *dev)
 
 	map->dir = dir;
 
-	table = iosys_map_attachment(attachment, dir);
+	table = dma_buf_map_attachment(attachment, dir);
 	if (IS_ERR_OR_NULL(table)) {
 		GSP_ERR("dma buffer map attachment failed\n");
 		goto done;
