@@ -1658,6 +1658,7 @@ static void sc27xx_typec_vbus_only_work(struct work_struct *work)
 
 static int sc27xx_typec_probe(struct platform_device *pdev)
 {
+	bool groups = false;
 	struct device *dev = &pdev->dev;
 	struct device_node *node = pdev->dev.of_node;
 	struct sc27xx_typec *sc;
@@ -1754,6 +1755,8 @@ static int sc27xx_typec_probe(struct platform_device *pdev)
 	ret = sysfs_create_groups(&sc->dev->kobj, sc27xx_typec_groups);
 	if (ret < 0)
 		dev_err(sc->dev, "failed to create cc_polarity %d\n", ret);
+	else
+		groups = true;
 
 	ret = typec_set_rtrim(sc);
 	if (ret < 0) {
@@ -1779,8 +1782,8 @@ static int sc27xx_typec_probe(struct platform_device *pdev)
 			goto error;
 		}
 		sc->vbus_nb.notifier_call = sc27xx_typec_get_vbus_notify;
-		ret = extcon_register_notifier(sc->vbus_dev, EXTCON_USB,
-						&sc->vbus_nb);
+		ret = devm_extcon_register_notifier(&pdev->dev, sc->vbus_dev,
+						    EXTCON_USB, &sc->vbus_nb);
 		if (ret) {
 			dev_err(sc->dev, "failed to register vbus extcon.\n");
 			goto error;
@@ -1803,17 +1806,24 @@ static int sc27xx_typec_probe(struct platform_device *pdev)
 	sc->wake_lock = wakeup_source_register(sc->dev, "sc27xx_typec");
 	if (!sc->wake_lock) {
 		dev_err(dev, "fail to register wakeup lock.\n");
+		ret = -ENOMEM;
 		goto error;
 	}
 
 	ret = sc27xx_typec_enable(sc);
-	if (ret)
+	if (ret) {
+		wakeup_source_unregister(sc->wake_lock);
 		goto error;
+	}
 	sc27xx_vbus_ok_bypass(sc);
 	platform_set_drvdata(pdev, sc);
 	return 0;
 
 error:
+	/* a deferred probe comes back: leave nothing behind for it to trip on */
+	if (groups)
+		sysfs_remove_groups(&sc->dev->kobj, sc27xx_typec_groups);
+	typec_sc = NULL;
 	if (!sc->use_pdhub_c2c)
 		typec_unregister_port(sc->port);
 	return ret;
