@@ -4326,12 +4326,8 @@ static int hci_setup_link_policy_sync(struct hci_dev *hdev)
 
 	if (lmp_rswitch_capable(hdev))
 		link_policy |= HCI_LP_RSWITCH;
-	if (lmp_hold_capable(hdev))
-		link_policy |= HCI_LP_HOLD;
 	if (lmp_sniff_capable(hdev))
 		link_policy |= HCI_LP_SNIFF;
-	if (lmp_park_capable(hdev))
-		link_policy |= HCI_LP_PARK;
 
 	cp.policy = cpu_to_le16(link_policy);
 
