@@ -244,7 +244,11 @@ static int vpu_pd_probe(struct platform_device *pdev)
 	}
 
 	pd->dev = &pdev->dev;
-	pd->gpd.name = kstrdup(np->name, GFP_KERNEL);
+	/*
+	 * The node's full name ("power-domain@1"): all the nodes are named
+	 * "power-domain", and on 6.18 genpd registers a device by this name.
+	 */
+	pd->gpd.name = kstrdup(np->full_name, GFP_KERNEL);
 	pd->gpd.power_off = vpu_pw_off;
 	pd->gpd.power_on = vpu_pw_on;
 
