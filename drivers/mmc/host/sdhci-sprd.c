@@ -31,6 +31,8 @@
 #define  SDHCI_SPRD_DLL_SEARCH_MODE	BIT(16)
 #define  SDHCI_SPRD_DLL_INIT_COUNT	0xc00
 #define  SDHCI_SPRD_DLL_PHASE_INTERNAL	0x3
+/* the r11p3 controller of the UMS9620/UMS9621 wants phase 0x2 */
+#define  SDHCI_SPRD_DLL_PHASE_INTERNAL_R11P3	0x2
 
 #define SDHCI_SPRD_REG_32_DLL_DLY	0x204
 
@@ -256,7 +258,18 @@ static inline void _sdhci_sprd_set_clock(struct sdhci_host *host,
 
 static void sdhci_sprd_enable_phy_dll(struct sdhci_host *host)
 {
+	u32 phase = SDHCI_SPRD_DLL_PHASE_INTERNAL;
 	u32 tmp;
+
+	/*
+	 * Unisoc's r11p3 controller programs the DLL's internal phase as 0x2;
+	 * with the 0x3 the older controllers use, HS400ES writes fail their CRC
+	 * (the vendor device trees do not distinguish the two, so this goes by
+	 * the SoC).
+	 */
+	if (of_machine_is_compatible("sprd,ums9620") ||
+	    of_machine_is_compatible("sprd,ums9621"))
+		phase = SDHCI_SPRD_DLL_PHASE_INTERNAL_R11P3;
 
 	tmp = sdhci_readl(host, SDHCI_SPRD_REG_32_DLL_CFG);
 	tmp &= ~(SDHCI_SPRD_DLL_EN | SDHCI_SPRD_DLL_ALL_CPST_EN);
@@ -266,7 +279,7 @@ static void sdhci_sprd_enable_phy_dll(struct sdhci_host *host)
 
 	tmp = sdhci_readl(host, SDHCI_SPRD_REG_32_DLL_CFG);
 	tmp |= SDHCI_SPRD_DLL_ALL_CPST_EN | SDHCI_SPRD_DLL_SEARCH_MODE |
-		SDHCI_SPRD_DLL_INIT_COUNT | SDHCI_SPRD_DLL_PHASE_INTERNAL;
+		SDHCI_SPRD_DLL_INIT_COUNT | phase;
 	sdhci_writel(host, tmp, SDHCI_SPRD_REG_32_DLL_CFG);
 	/* wait 1ms */
 	usleep_range(1000, 1250);
