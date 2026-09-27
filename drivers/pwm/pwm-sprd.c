@@ -9,6 +9,7 @@
 #include <linux/math64.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
 
@@ -17,23 +18,34 @@
 #define SPRD_PWM_DUTY		0x8
 #define SPRD_PWM_ENABLE		0x18
 
-#define SPRD_PWM_MOD_MAX	GENMASK(7, 0)
 #define SPRD_PWM_DUTY_MSK	GENMASK(15, 0)
 #define SPRD_PWM_PRESCALE_MSK	GENMASK(7, 0)
 #define SPRD_PWM_ENABLE_BIT	BIT(0)
 
 #define SPRD_PWM_CHN_NUM	4
-#define SPRD_PWM_REGS_SHIFT	5
 #define SPRD_PWM_CHN_CLKS_NUM	2
 #define SPRD_PWM_CHN_OUTPUT_CLK	1
+
+/*
+ * The channels' register stride, and the counter length (MOD) a channel
+ * uses unless the "counter-bits" property of the node says otherwise: the
+ * UMS512 has channels every 32 bytes and 8-bit counters, the UMS9620 family
+ * one every 16 KiB and counters of 8 to 12 bits.
+ */
+struct sprd_pwm_data {
+	u32 regs_shift;
+	u32 mod;
+};
 
 struct sprd_pwm_chn {
 	struct clk_bulk_data clks[SPRD_PWM_CHN_CLKS_NUM];
 	u32 clk_rate;
+	u32 mod;
 };
 
 struct sprd_pwm_chip {
 	void __iomem *base;
+	u32 regs_shift;
 	struct sprd_pwm_chn chn[SPRD_PWM_CHN_NUM];
 };
 
@@ -55,7 +67,7 @@ static const char * const sprd_pwm_clks[] = {
 
 static u32 sprd_pwm_read(struct sprd_pwm_chip *spc, u32 hwid, u32 reg)
 {
-	u32 offset = reg + (hwid << SPRD_PWM_REGS_SHIFT);
+	u32 offset = reg + (hwid << spc->regs_shift);
 
 	return readl_relaxed(spc->base + offset);
 }
@@ -63,7 +75,7 @@ static u32 sprd_pwm_read(struct sprd_pwm_chip *spc, u32 hwid, u32 reg)
 static void sprd_pwm_write(struct sprd_pwm_chip *spc, u32 hwid,
 			   u32 reg, u32 val)
 {
-	u32 offset = reg + (hwid << SPRD_PWM_REGS_SHIFT);
+	u32 offset = reg + (hwid << spc->regs_shift);
 
 	writel_relaxed(val, spc->base + offset);
 }
@@ -104,7 +116,7 @@ static int sprd_pwm_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
 	 */
 	val = sprd_pwm_read(spc, pwm->hwpwm, SPRD_PWM_PRESCALE);
 	prescale = val & SPRD_PWM_PRESCALE_MSK;
-	tmp = (prescale + 1) * NSEC_PER_SEC * SPRD_PWM_MOD_MAX;
+	tmp = (prescale + 1) * NSEC_PER_SEC * chn->mod;
 	state->period = DIV_ROUND_CLOSEST_ULL(tmp, chn->clk_rate);
 
 	val = sprd_pwm_read(spc, pwm->hwpwm, SPRD_PWM_DUTY);
@@ -132,16 +144,16 @@ static int sprd_pwm_config(struct sprd_pwm_chip *spc, struct pwm_device *pwm,
 	 * The period length is (PRESCALE + 1) * MOD counter steps.
 	 * The duty cycle length is (PRESCALE + 1) * DUTY counter steps.
 	 *
-	 * To keep the maths simple we're always using MOD = SPRD_PWM_MOD_MAX.
-	 * The value for PRESCALE is selected such that the resulting period
-	 * gets the maximal length not bigger than the requested one with the
-	 * given settings (MOD = SPRD_PWM_MOD_MAX and input clock).
+	 * To keep the maths simple we're always using the channel's full
+	 * counter as MOD. The value for PRESCALE is selected such that the
+	 * resulting period gets the maximal length not bigger than the
+	 * requested one with the given settings (that MOD and input clock).
 	 */
-	duty = duty_ns * SPRD_PWM_MOD_MAX / period_ns;
+	duty = (u64)duty_ns * chn->mod / period_ns;
 
 	tmp = (u64)chn->clk_rate * period_ns;
 	do_div(tmp, NSEC_PER_SEC);
-	prescale = DIV_ROUND_CLOSEST_ULL(tmp, SPRD_PWM_MOD_MAX) - 1;
+	prescale = DIV_ROUND_CLOSEST_ULL(tmp, chn->mod) - 1;
 	if (prescale > SPRD_PWM_PRESCALE_MSK)
 		prescale = SPRD_PWM_PRESCALE_MSK;
 
@@ -154,7 +166,7 @@ static int sprd_pwm_config(struct sprd_pwm_chip *spc, struct pwm_device *pwm,
 	 * before changing a new configuration to avoid mixed settings.
 	 */
 	sprd_pwm_write(spc, pwm->hwpwm, SPRD_PWM_PRESCALE, prescale);
-	sprd_pwm_write(spc, pwm->hwpwm, SPRD_PWM_MOD, SPRD_PWM_MOD_MAX);
+	sprd_pwm_write(spc, pwm->hwpwm, SPRD_PWM_MOD, chn->mod);
 	sprd_pwm_write(spc, pwm->hwpwm, SPRD_PWM_DUTY, duty);
 
 	return 0;
@@ -212,14 +224,21 @@ static const struct pwm_ops sprd_pwm_ops = {
 	.get_state = sprd_pwm_get_state,
 };
 
-static int sprd_pwm_clk_init(struct device *dev,
+static int sprd_pwm_clk_init(struct device *dev, const struct sprd_pwm_data *data,
 			     struct sprd_pwm_chn chn[SPRD_PWM_CHN_NUM])
 {
 	struct clk *clk_pwm;
 	int ret, i;
 
 	for (i = 0; i < SPRD_PWM_CHN_NUM; i++) {
+		const char *bits;
+		u32 n;
 		int j;
+
+		chn[i].mod = data->mod;
+		if (!of_property_read_string_index(dev->of_node, "counter-bits", i, &bits) &&
+		    sscanf(bits, "%ubit", &n) == 1 && n >= 8 && n <= 12)
+			chn[i].mod = GENMASK(n - 1, 0);
 
 		for (j = 0; j < SPRD_PWM_CHN_CLKS_NUM; ++j)
 			chn[i].clks[j].id =
@@ -250,9 +269,10 @@ static int sprd_pwm_probe(struct platform_device *pdev)
 	struct pwm_chip *chip;
 	struct sprd_pwm_chip *spc;
 	struct sprd_pwm_chn chn[SPRD_PWM_CHN_NUM];
+	const struct sprd_pwm_data *data = of_device_get_match_data(&pdev->dev);
 	int ret, npwm;
 
-	npwm = sprd_pwm_clk_init(&pdev->dev, chn);
+	npwm = sprd_pwm_clk_init(&pdev->dev, data, chn);
 	if (npwm < 0)
 		return npwm;
 
@@ -265,6 +285,7 @@ static int sprd_pwm_probe(struct platform_device *pdev)
 	if (IS_ERR(spc->base))
 		return PTR_ERR(spc->base);
 
+	spc->regs_shift = data->regs_shift;
 	memcpy(spc->chn, chn, sizeof(chn));
 
 	chip->ops = &sprd_pwm_ops;
@@ -276,8 +297,19 @@ static int sprd_pwm_probe(struct platform_device *pdev)
 	return ret;
 }
 
+static const struct sprd_pwm_data ums512_pwm_data = {
+	.regs_shift = 5,
+	.mod = GENMASK(7, 0),
+};
+
+static const struct sprd_pwm_data ums9620_pwm_data = {
+	.regs_shift = 14,
+	.mod = GENMASK(9, 0),
+};
+
 static const struct of_device_id sprd_pwm_of_match[] = {
-	{ .compatible = "sprd,ums512-pwm", },
+	{ .compatible = "sprd,ums512-pwm", .data = &ums512_pwm_data },
+	{ .compatible = "sprd,ums9620-pwm", .data = &ums9620_pwm_data },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, sprd_pwm_of_match);
