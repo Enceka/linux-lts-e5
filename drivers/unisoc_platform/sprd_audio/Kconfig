@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Unisoc audio platform plumbing, imported from
+# android_kernel_modules_and_devicetree_oppo_ums9230
+# (bsp/modules/kernel5.15/audio/sprd_audio).
+#
+# These sit underneath the ASoC stack in sound/soc/sprd/unisoc/: they bring up
+# the audio DSP (agdsp_pd, sprd_audcp_boot, sprd_audcp_dvfs), carve out its
+# shared memory (audio_mem), and carry the control/data channels to it
+# (audio_sipc, audio-pipe, sprd_apipe, audio-dsp-dump).
+#
+# Only the pieces this board actually binds are imported.  Left out from
+# upstream: saudio, usb_adaptive, usb_offload, voice_trigger (node variant) and
+# mcdt_r1p0 - none of them bind a device here.
+
+config UNISOC_AUDIO
+	bool "Unisoc audio platform support"
+	depends on ARCH_SPRD
+	default n
+	help
+	  Umbrella switch for the Unisoc audio DSP plumbing.  Says nothing on
+	  its own; enable the individual modules below.
+
+if UNISOC_AUDIO
+
+config UNISOC_AUDIO_MEM
+	tristate "Unisoc audio shared memory (audio_mem.ko)"
+	help
+	  Carves the audio DSP's shared memory regions out of the reserved
+	  memory described in the device tree.  Almost everything else here
+	  depends on it.
+
+config UNISOC_AUDIO_AGDSP_PD
+	tristate "Unisoc audio DSP power domain (agdsp_pd.ko)"
+	help
+	  Power/clock gating for the AGDSP block.
+
+config UNISOC_AUDIO_SIPC
+	tristate "Unisoc audio SIPC channels (audio_sipc.ko)"
+	depends on UNISOC_AUDIO_MEM
+	help
+	  smsg/sblock style channels between the AP and the audio DSP.
+
+config UNISOC_AUDIO_PIPE
+	tristate "Unisoc audio pipe char devices (audio-pipe.ko)"
+	depends on UNISOC_AUDIO_SIPC
+	help
+	  /dev/audio_* character devices layered on the SIPC channels.
+
+config UNISOC_AUDIO_APIPE
+	tristate "Unisoc audio pipe platform device (sprd_apipe.ko)"
+	help
+	  Registers the platform devices that audio-pipe binds to.
+
+config UNISOC_AUDIO_CP_BOOT
+	tristate "Unisoc audio DSP boot (sprd_audcp_boot.ko)"
+	depends on UNISOC_AUDIO_MEM && UNISOC_AUDIO_SIPC
+	help
+	  Loads the audio DSP firmware and releases the DSP from reset.
+
+config UNISOC_AUDIO_CP_DVFS
+	tristate "Unisoc audio DSP DVFS (sprd_audcp_dvfs.ko)"
+	depends on UNISOC_AUDIO_MEM && UNISOC_AUDIO_SIPC && UNISOC_AUDIO_AGDSP_PD
+	help
+	  Frequency scaling for the audio DSP.
+
+config UNISOC_AUDIO_DSP_DUMP
+	tristate "Unisoc audio DSP log/dump (audio-dsp-dump.ko)"
+	depends on UNISOC_AUDIO_MEM && UNISOC_AUDIO_SIPC && UNISOC_AUDIO_AGDSP_PD
+	help
+	  Pulls DSP logs and crash dumps over dedicated sblock channels.
+
+config UNISOC_AUDIO_VOICE_TRIGGER_IRQ
+	tristate "Unisoc voice trigger interrupt (voice_trigger_irq.ko)"
+	depends on UNISOC_AUDIO_AGDSP_PD
+	help
+	  Wakeup interrupt raised by the DSP for always-on voice trigger.
+
+config UNISOC_AUDIO_MCDT_R2P0
+	tristate "Unisoc multi-channel data transfer r2p0 (mcdt_hw_r2p0.ko)"
+	help
+	  Vendor MCDT driver.  Note this is a different driver from the
+	  mainline SND_SOC_SPRD_MCDT in sound/soc/sprd/ - the stock image
+	  ships this one (mcdt_hw_r2p0.ko) and no sprd-mcdt.ko, so do not
+	  enable both.
+
+endif # UNISOC_AUDIO

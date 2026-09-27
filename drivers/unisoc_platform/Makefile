@@ -13,3 +13,4 @@ obj-$(CONFIG_UNISOC_DISP)	+= sprd_disp/
 obj-$(CONFIG_UNISOC_IOMMU)	+= iommu/
 obj-$(CONFIG_UNISOC_SOC_THERMAL)	+= thermal/
 obj-$(CONFIG_SPRD_USBPINMUX)	+= usbpinmux/
+obj-$(CONFIG_UNISOC_AUDIO)	+= sprd_audio/
