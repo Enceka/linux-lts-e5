@@ -1,0 +1,19 @@
+#
+# Unisoc Wlan Combo configuration
+#
+menu "Unisoc Wlan Device Drivers"
+
+config UNISOC_WLAN_COMBO
+	tristate "UNISOC_WLAN_COMBO"
+	depends on CFG80211
+	depends on UNISOC_WCN_BSP
+	help
+	  Fullmac cfg80211 WLAN driver for the Unisoc WCN combo chip
+	  (sc2332/sc2355 and the marlin3/marlin3lite chips built on them),
+	  talking to the WCN core over the sprdwcn bus. Builds
+	  sprd_wlan_combo.ko.
+
+	  If you want to use WiFi on a 23xx-series Unisoc WCN chip, say Y
+	  or M here.
+
+endmenu

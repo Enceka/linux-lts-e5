@@ -8,5 +8,6 @@ menu "Unisoc platform drivers"
 
 source "drivers/unisoc_platform/modem/Kconfig"
 source "drivers/unisoc_platform/sprdwcn/Kconfig"
+source "drivers/unisoc_platform/sprd_wlan_combo/Kconfig"
 
 endmenu
