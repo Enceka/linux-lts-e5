@@ -106,6 +106,19 @@
 #define PMIC_CLK_EN			0xc18
 #define PMIC_WDG_BASE			0x80
 
+/* UMP9620 PMIC (UMS9620): reboot mode is kept in RST_STATUS, reset via the software reset controller */
+#define UMP9620_RST_STATUS		0x23ac
+#define UMP9620_SOFT_RST_HW		0x2024
+#define UMP9620_SWRST_CTRL0		0x23f8
+#define UMP9620_BIT_RST_EN		BIT(4)
+#define UMP9620_BIT_SOFT_RST		BIT(0)
+/* power-off, as the vendor's sc27xx-poweroff driver does it for the UMP9620 */
+#define UMP9620_PWR_PD_HW		0x2020
+#define UMP9620_SLP_CTRL		0x2248
+#define UMP9620_BIT_LDO_XTL_EN		BIT(2)
+#define UMP9620_BIT_SLP_LDO_PD_EN	BIT(0)
+#define UMP9620_BIT_PWR_OFF_EN		BIT(0)
+
 /* Definition of PMIC reset status register */
 #define HWRST_STATUS_SECURITY		0x02
 #define HWRST_STATUS_RECOVERY		0x20
@@ -139,6 +152,9 @@ struct sprd_adi_data {
 	u32 slave_addr_size;
 	int (*read_check)(u32 val, u32 reg);
 	int (*restart)(struct sys_off_data *data);
+	/* PSCI SYSTEM_RESET (priority 129) hangs on some firmware; run before it */
+	int restart_prio;
+	int (*power_off)(struct sys_off_data *data);
 	void (*wdg_rst)(void *p);
 };
 
@@ -456,6 +472,51 @@ static int sprd_adi_restart_sc9860(struct sys_off_data *data)
 	return sprd_adi_restart(data->cb_data, data->mode, data->cmd, &wdg);
 }
 
+static int sprd_adi_restart_ums9620(struct sys_off_data *data)
+{
+	struct sprd_adi *sadi = data->cb_data;
+	u32 val, reboot_mode = HWRST_STATUS_NORMAL;
+
+	if (data->cmd && !strncmp(data->cmd, "recovery", 8))
+		reboot_mode = HWRST_STATUS_RECOVERY;
+	else if (data->cmd && !strncmp(data->cmd, "panic", 5))
+		reboot_mode = HWRST_STATUS_PANIC;
+
+	sprd_adi_read(sadi, UMP9620_RST_STATUS, &val);
+	val &= ~0xff;
+	val |= reboot_mode;
+	sprd_adi_write(sadi, UMP9620_RST_STATUS, val);
+
+	sprd_adi_read(sadi, UMP9620_SWRST_CTRL0, &val);
+	sprd_adi_write(sadi, UMP9620_SWRST_CTRL0, val | UMP9620_BIT_RST_EN);
+
+	sprd_adi_read(sadi, UMP9620_SOFT_RST_HW, &val);
+	sprd_adi_write(sadi, UMP9620_SOFT_RST_HW, val | UMP9620_BIT_SOFT_RST);
+
+	mdelay(1000);
+
+	dev_emerg(sadi->dev, "Unable to restart system\n");
+	return NOTIFY_DONE;
+}
+
+/* PSCI SYSTEM_OFF does not return on this firmware either; the PMIC switches the system off */
+static int sprd_adi_power_off_ums9620(struct sys_off_data *data)
+{
+	struct sprd_adi *sadi = data->cb_data;
+	u32 val;
+
+	/* keep the crystal LDO and the sleep-mode LDO power-down out of the way first, like the vendor driver */
+	sprd_adi_read(sadi, UMP9620_SLP_CTRL, &val);
+	sprd_adi_write(sadi, UMP9620_SLP_CTRL, val & ~(UMP9620_BIT_LDO_XTL_EN | UMP9620_BIT_SLP_LDO_PD_EN));
+
+	sprd_adi_write(sadi, UMP9620_PWR_PD_HW, UMP9620_BIT_PWR_OFF_EN);
+
+	mdelay(1000);
+
+	dev_emerg(sadi->dev, "Unable to power off system\n");
+	return NOTIFY_DONE;
+}
+
 static void sprd_adi_hw_init(struct sprd_adi *sadi)
 {
 	struct device_node *np = sadi->dev->of_node;
@@ -584,11 +645,23 @@ static int sprd_adi_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, ret, "failed to register SPI controller\n");
 
 	if (sadi->data->restart) {
-		ret = devm_register_restart_handler(&pdev->dev,
+		ret = devm_register_sys_off_handler(&pdev->dev,
+						    SYS_OFF_MODE_RESTART,
+						    sadi->data->restart_prio ?: SYS_OFF_PRIO_DEFAULT,
 						    sadi->data->restart,
 						    sadi);
 		if (ret)
 			return dev_err_probe(&pdev->dev, ret, "can not register restart handler\n");
+	}
+
+	if (sadi->data->power_off) {
+		ret = devm_register_sys_off_handler(&pdev->dev,
+						    SYS_OFF_MODE_POWER_OFF,
+						    SYS_OFF_PRIO_HIGH,
+						    sadi->data->power_off,
+						    sadi);
+		if (ret)
+			return dev_err_probe(&pdev->dev, ret, "can not register power-off handler\n");
 	}
 
 	return 0;
@@ -614,6 +687,15 @@ static struct sprd_adi_data ums512_data = {
 	.read_check = sprd_adi_read_check_r3,
 };
 
+/* ADI r5p0: read data carries no register address, so there is nothing to check */
+static struct sprd_adi_data ums9620_data = {
+	.slave_offset = ADI_15BIT_SLAVE_OFFSET,
+	.slave_addr_size = ADI_15BIT_SLAVE_ADDR_SIZE,
+	.restart = sprd_adi_restart_ums9620,
+	.restart_prio = SYS_OFF_PRIO_HIGH,
+	.power_off = sprd_adi_power_off_ums9620,
+};
+
 static const struct of_device_id sprd_adi_of_match[] = {
 	{
 		.compatible = "sprd,sc9860-adi",
@@ -626,6 +708,15 @@ static const struct of_device_id sprd_adi_of_match[] = {
 	{
 		.compatible = "sprd,ums512-adi",
 		.data = &ums512_data,
+	},
+	{
+		.compatible = "sprd,ums9620-adi",
+		.data = &ums9620_data,
+	},
+	{
+		/* name used by the Unisoc vendor device tree for the same controller */
+		.compatible = "sprd,qogirn6pro-adi",
+		.data = &ums9620_data,
 	},
 	{ },
 };
