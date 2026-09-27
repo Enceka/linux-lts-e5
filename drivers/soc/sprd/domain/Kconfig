@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0
+config SPRD_DISP_PM_DOMAIN_SHARKL3
+	tristate "SPRD Display PM Generic Domain for SharkL3"
+	default m
+	depends on ARCH_SPRD || COMPILE_TEST
+	select PM_GENERIC_DOMAINS if PM
+	help
+	  When you select this feature, it will enable the pm generic
+	  power domain for SharkL3 display module.
+
+config SPRD_VPU_PW_DOMAIN
+	tristate "SPRD VPU Power Domain"
+	default m
+	depends on ARCH_SPRD || COMPILE_TEST
+	select PM_GENERIC_DOMAINS if PM
+	help
+	  Vendor power domain driver for the UMS9621 VPU/DPU/VSP power
+	  domains ("sprd,vpu-pd").  The display stack (dpu/dsi/gsp) hangs
+	  off <&vpu_pd_top>, so without a registered generic PM domain the
+	  genpd core returns -EPROBE_DEFER and no display device ever
+	  probes.  Stock ships this as sprd-vpu-pw-domain.ko in
+	  vendor_dlkm; here it is built in-tree from the vendor source.

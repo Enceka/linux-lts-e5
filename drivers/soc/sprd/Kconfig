@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Unisoc SoC drivers from the E5's 5.15 tree (of its drivers/soc/sprd, the power domains)
+source "drivers/soc/sprd/domain/Kconfig"
