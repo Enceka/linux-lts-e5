@@ -237,6 +237,20 @@ config BT_HCIUART_RTL
 
 	  Say Y here to compile support for Realtek protocol.
 
+config BT_HCIUART_SPRD
+	bool "Unisoc (Spreadtrum) marlin3 configuration"
+	depends on BT_HCIUART
+	help
+	  The Unisoc marlin3 WCN combo chip's Bluetooth core, attached over
+	  the vendor SDIO tty (ttyBT) with the H4 protocol, needs its pskey
+	  and RF configuration written before the first HCI Reset.  With this
+	  option hci_uart loads sprd/marlin3lite_pskey.bin and
+	  sprd/marlin3lite_rf.bin through the firmware loader and sends them
+	  when such a tty is attached.
+
+	  Say Y here if the Bluetooth controller of a Unisoc WCN chip is
+	  attached through its ttyBT device.
+
 config BT_HCIUART_QCA
 	bool "Qualcomm Atheros protocol support"
 	depends on BT_HCIUART

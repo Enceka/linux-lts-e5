@@ -33,6 +33,7 @@
 
 #include "btintel.h"
 #include "btbcm.h"
+#include "btsprd.h"
 #include "hci_uart.h"
 
 #define VERSION "2.3"
@@ -442,6 +443,17 @@ static int hci_uart_setup(struct hci_dev *hdev)
 
 	if (hu->proto->setup)
 		return hu->proto->setup(hu);
+
+	/*
+	 * e5-linux: the Unisoc marlin3 BT core behind the vendor SDIO tty
+	 * ("ttyBT") needs its pskey/RF configuration before the first HCI
+	 * Reset.  It talks plain H4, so it is recognised by its transport
+	 * rather than by a protocol of its own: btattach -P h4 stays the
+	 * standard way to attach it.
+	 */
+	if (IS_ENABLED(CONFIG_BT_HCIUART_SPRD) && hu->tty && hu->tty->driver &&
+	    hu->tty->driver->name && !strcmp(hu->tty->driver->name, "ttyBT"))
+		return btsprd_setup_marlin3(hdev);
 
 	if (!test_bit(HCI_UART_VND_DETECT, &hu->hdev_flags))
 		return 0;
