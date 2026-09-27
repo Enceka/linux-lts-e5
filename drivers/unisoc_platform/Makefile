@@ -12,3 +12,4 @@ obj-$(CONFIG_UNISOC_WCN_BT)	+= sprd_bt/
 obj-$(CONFIG_UNISOC_DISP)	+= sprd_disp/
 obj-$(CONFIG_UNISOC_IOMMU)	+= iommu/
 obj-$(CONFIG_UNISOC_SOC_THERMAL)	+= thermal/
+obj-$(CONFIG_SPRD_USBPINMUX)	+= usbpinmux/
