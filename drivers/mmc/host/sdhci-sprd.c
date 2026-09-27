@@ -747,6 +747,7 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 	struct sdhci_sprd_host *sprd_host;
 	struct mmc_hsq *hsq;
 	struct clk *clk;
+	u32 ocr_mask = 0;
 	int ret = 0;
 
 	host = sdhci_pltfm_init(pdev, &sdhci_sprd_pdata, sizeof(*sprd_host));
@@ -859,6 +860,22 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 	ret = sdhci_setup_host(host);
 	if (ret)
 		goto pm_runtime_disable;
+
+	/*
+	 * The card's supply voltage comes from the device tree's
+	 * "voltage-ranges" (3.0 V for the eMMC on the UMS9621 boards, which
+	 * Unisoc's kernel hard-codes): otherwise the OCR mask is the
+	 * regulator's whole range, and the card is powered up at its top, 3.5 V
+	 * on the UMP9620's LDOs.  It has to be narrowed after sdhci_setup_host(),
+	 * where the regulator's range takes precedence over host->ocr_mask.
+	 */
+	if (mmc_of_parse_voltage(host->mmc, &ocr_mask) > 0 &&
+	    (host->mmc->ocr_avail & ocr_mask)) {
+		host->mmc->ocr_avail &= ocr_mask;
+		host->mmc->ocr_avail_sdio &= ocr_mask;
+		host->mmc->ocr_avail_sd &= ocr_mask;
+		host->mmc->ocr_avail_mmc &= ocr_mask;
+	}
 
 	sprd_host->flags = host->flags;
 
