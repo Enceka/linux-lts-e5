@@ -6,3 +6,4 @@ subdir-ccflags-y += -Wno-missing-prototypes -Wno-missing-declarations
 obj-y				+= modem/
 obj-$(CONFIG_UNISOC_WCN_BSP)	+= sprdwcn/
 obj-$(CONFIG_UNISOC_WLAN_COMBO)	+= sprd_wlan_combo/
+obj-$(CONFIG_UNISOC_WCN_BT)	+= sprd_bt/

@@ -1,0 +1,17 @@
+#
+# Unisoc Bluetooth device configuration
+#
+menu "Unisoc Bluetooth Device Drivers"
+
+config UNISOC_WCN_BT
+	tristate "SPRDBT_TTY"
+	depends on UNISOC_WCN_BSP
+	help
+	  Bluetooth TTY driver for the Unisoc WCN combo chip (marlin3 and
+	  later), talking to the WCN core over the sprdwcn bus. Builds
+	  sprdbt_tty.ko.
+
+	  If you want to use Bluetooth on a 23xx-series Unisoc WCN chip,
+	  say Y or M here.
+
+endmenu
