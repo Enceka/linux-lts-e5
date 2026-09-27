@@ -109,6 +109,15 @@ struct panfrost_compatible {
 
 	/* GPU configuration quirks */
 	u8 gpu_quirks;
+
+	/*
+	 * Some SoCs clock their GPU from a hardware DVFS engine that the
+	 * generic OPP/devfreq layer cannot drive: Unisoc picks a frequency by
+	 * writing an index into a syscon register and the PLL behind the GPU
+	 * is shared with the rest of the SoC, so clk_set_rate() must not be
+	 * used on it.  Skip devfreq on those parts.
+	 */
+	bool no_devfreq;
 };
 
 /**
@@ -122,12 +131,17 @@ struct panfrost_device_debugfs {
 	struct mutex gems_lock;
 };
 
+struct panfrost_sprd;
+
 struct panfrost_device {
 	struct device *dev;
 	struct drm_device *ddev;
 	struct platform_device *pdev;
 	int gpu_irq;
 	int mmu_irq;
+
+	/* SoC-specific power/clock glue, see panfrost_sprd.c */
+	struct panfrost_sprd *sprd;
 
 	void __iomem *iomem;
 	struct clk *clock;
@@ -240,6 +254,7 @@ static inline bool panfrost_model_eq(struct panfrost_device *pfdev, s32 id)
 int panfrost_unstable_ioctl_check(void);
 
 int panfrost_device_init(struct panfrost_device *pfdev);
+int panfrost_irq_get(struct panfrost_device *pfdev, const char *name);
 void panfrost_device_fini(struct panfrost_device *pfdev);
 void panfrost_device_reset(struct panfrost_device *pfdev);
 

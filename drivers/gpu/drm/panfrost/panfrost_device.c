@@ -7,7 +7,9 @@
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
+#include <linux/of_irq.h>
 #include <linux/regulator/consumer.h>
+#include <linux/string.h>
 
 #include "panfrost_device.h"
 #include "panfrost_devfreq.h"
@@ -17,6 +19,7 @@
 #include "panfrost_job.h"
 #include "panfrost_mmu.h"
 #include "panfrost_perfcnt.h"
+#include "panfrost_sprd.h"
 
 static int panfrost_reset_init(struct panfrost_device *pfdev)
 {
@@ -86,6 +89,11 @@ static void panfrost_clk_fini(struct panfrost_device *pfdev)
 static int panfrost_regulator_init(struct panfrost_device *pfdev)
 {
 	int ret, i;
+
+	/* No supplies declared: nothing to do (devm_kcalloc(0, ...) is not a
+	 * usable array to hand to the regulator core). */
+	if (!pfdev->comp->num_supplies)
+		return 0;
 
 	pfdev->regulators = devm_kcalloc(pfdev->dev, pfdev->comp->num_supplies,
 					 sizeof(*pfdev->regulators),
@@ -197,6 +205,42 @@ err:
 	return err;
 }
 
+/*
+ * Look up a named interrupt, tolerating the upper-case names the vendor
+ * device trees use ("JOB", "MMU", "GPU"): of_irq_get_byname() is case
+ * sensitive, and on some SoCs the only device tree we can use is the one the
+ * vendor BSP wrote for kbase.
+ *
+ * The first attempt is the *_optional() variant, which does not log: with the
+ * plain one a device tree that needs the fallback prints "IRQ gpu not found"
+ * (and one per interrupt) before each lookup succeeds, which reads like a
+ * failure and is not one.
+ */
+int panfrost_irq_get(struct panfrost_device *pfdev, const char *name)
+{
+	struct device_node *np = pfdev->dev->of_node;
+	const char *irq_name;
+	int irq, i;
+
+	irq = platform_get_irq_byname_optional(pfdev->pdev, name);
+	if (irq != -EPROBE_DEFER && irq >= 0)
+		return irq;
+
+	for (i = 0; i < of_irq_count(np); i++) {
+		if (of_property_read_string_index(np, "interrupt-names", i,
+						  &irq_name))
+			break;
+
+		if (!strcasecmp(irq_name, name)) {
+			dev_dbg(pfdev->dev, "irq \"%s\" is \"%s\" in this dtb\n",
+				name, irq_name);
+			return platform_get_irq(pfdev->pdev, i);
+		}
+	}
+
+	return irq;
+}
+
 int panfrost_device_init(struct panfrost_device *pfdev)
 {
 	int err;
@@ -230,11 +274,13 @@ int panfrost_device_init(struct panfrost_device *pfdev)
 		goto out_reset;
 	}
 
-	err = panfrost_devfreq_init(pfdev);
-	if (err) {
-		if (err != -EPROBE_DEFER)
-			dev_err(pfdev->dev, "devfreq init failed %d\n", err);
-		goto out_clk;
+	if (!pfdev->comp->no_devfreq) {
+		err = panfrost_devfreq_init(pfdev);
+		if (err) {
+			if (err != -EPROBE_DEFER)
+				dev_err(pfdev->dev, "devfreq init failed %d\n", err);
+			goto out_clk;
+		}
 	}
 
 	/* OPP will handle regulators */
@@ -250,9 +296,23 @@ int panfrost_device_init(struct panfrost_device *pfdev)
 		goto out_regulator;
 	}
 
+	/*
+	 * SoC side power/clock sequencing.  On Unisoc parts the GPU sits
+	 * behind the PMU/APB syscons, and the sequence that actually brings it
+	 * out of reset is done by the vendor kbase driver's platform code, not
+	 * by any generic power domain.  This has to happen after
+	 * panfrost_reset_init() (it re-uses pfdev->rstc) and before a single
+	 * GPU register is touched, which starts in panfrost_gpu_init() below.
+	 */
+	err = panfrost_sprd_init(pfdev);
+	if (err) {
+		dev_err(pfdev->dev, "sprd init failed %d\n", err);
+		goto out_regulator;
+	}
+
 	err = panfrost_gpu_init(pfdev);
 	if (err)
-		goto out_regulator;
+		goto out_sprd;
 
 	err = panfrost_mmu_init(pfdev);
 	if (err)
@@ -273,6 +333,8 @@ out_mmu:
 	panfrost_mmu_fini(pfdev);
 out_gpu:
 	panfrost_gpu_fini(pfdev);
+out_sprd:
+	panfrost_sprd_fini(pfdev);
 out_regulator:
 	panfrost_regulator_fini(pfdev);
 out_devfreq:
@@ -292,6 +354,7 @@ void panfrost_device_fini(struct panfrost_device *pfdev)
 	panfrost_job_fini(pfdev);
 	panfrost_mmu_fini(pfdev);
 	panfrost_gpu_fini(pfdev);
+	panfrost_sprd_fini(pfdev);
 	panfrost_devfreq_fini(pfdev);
 	panfrost_regulator_fini(pfdev);
 	panfrost_clk_fini(pfdev);
