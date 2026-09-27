@@ -18,6 +18,7 @@
 
 #include <linux/cdev.h>
 #include <linux/genalloc.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/mm.h>
@@ -88,11 +89,18 @@ struct smem_map_list {
 	u32		inited;
 };
 
+enum smem_map_how {
+	SMEM_VMAP,	/* vmap() of the region's pages, with the requested pgprot */
+	SMEM_IOREMAP,	/* a no-map region, which has no pages: ioremap()/ioremap_wc() */
+	SMEM_MEMREMAP,	/* a no-map region mapped cached: memremap(MEMREMAP_WB) */
+};
+
 struct smem_map {
 	struct list_head	map_list;
 	struct task_struct	*task;
 	const void		*mem;
 	unsigned int		count;
+	enum smem_map_how	how;
 };
 
 static struct smem_phead	sipc_smem_phead[SIPC_ID_NR];
@@ -151,18 +159,48 @@ static void *soc_modem_ram_vmap(phys_addr_t start, size_t size, E_MMAP_TYPE mtyp
 	else
 		prot = PAGE_KERNEL;
 
-	pages = kmalloc_array(page_count, sizeof(struct page *), GFP_KERNEL);
-	if (!pages) {
+	/*
+	 * The regions the CP shares are either reserved inside System RAM, with
+	 * pages (sipc-mem), or no-map (the CP's own cp-modem region, which the
+	 * modem loader writes the CP image into).  vmap() refuses pages without
+	 * a valid pfn since 5.19, so a no-map region is ioremapped instead, with
+	 * the same memory type: the CP does not snoop the AP's caches, and a
+	 * cached alias here is data the CP never sees (mu300-linux, where the
+	 * port's memremap() fell back to write-back, measured exactly that).
+	 */
+	if (!pfn_valid(PHYS_PFN(page_start)) ||
+	    !pfn_valid(PHYS_PFN(page_start + (phys_addr_t)(page_count - 1) * PAGE_SIZE))) {
+		size_t len = (size_t)page_count * PAGE_SIZE;
+
+		if (mtype == MMAP_CACHE) {
+			vaddr = memremap(page_start, len, MEMREMAP_WB);
+			map->how = SMEM_MEMREMAP;
+		} else {
+			vaddr = (__force void *)(mtype == MMAP_WRITECOMBINE ?
+				ioremap_wc(page_start, len) : ioremap(page_start, len));
+			map->how = SMEM_IOREMAP;
+		}
+	} else {
+		pages = kmalloc_array(page_count, sizeof(struct page *), GFP_KERNEL);
+		if (!pages) {
+			kfree(map);
+			return NULL;
+		}
+
+		for (i = 0; i < page_count; i++) {
+			addr = page_start + i * PAGE_SIZE;
+			pages[i] = pfn_to_page(addr >> PAGE_SHIFT);
+		}
+		vaddr = vmap(pages, page_count, VM_IOREMAP, prot);
+		kfree(pages);
+		map->how = SMEM_VMAP;
+	}
+	if (!vaddr) {
+		pr_err("smem: cannot map %pa (%u pages)\n", &page_start, page_count);
 		kfree(map);
 		return NULL;
 	}
-
-	for (i = 0; i < page_count; i++) {
-		addr = page_start + i * PAGE_SIZE;
-		pages[i] = pfn_to_page(addr >> PAGE_SHIFT);
-	}
-	vaddr = vmap(pages, page_count, VM_IOREMAP, prot) + offset_in_page(start);
-	kfree(pages);
+	vaddr += offset_in_page(start);
 
 	map->count = page_count;
 	map->mem = vaddr;
@@ -224,7 +262,14 @@ static void soc_modem_ram_unmap(const void *mem)
 		spin_unlock_irqrestore(&smem->lock, flags);
 
 		if (found) {
-			vunmap(mem - offset_in_page(mem));
+			void *base = (void *)(mem - offset_in_page(mem));
+
+			if (map->how == SMEM_IOREMAP)
+				iounmap((__force void __iomem *)base);
+			else if (map->how == SMEM_MEMREMAP)
+				memunmap(base);
+			else
+				vunmap(base);
 			kfree(map);
 		}
 	}
