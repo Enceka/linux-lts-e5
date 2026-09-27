@@ -13,6 +13,7 @@
 #include <linux/regmap.h>
 
 struct device_node;
+struct sprd_reset_map;
 
 struct sprd_clk_common {
 	struct regmap	*regmap;
@@ -24,6 +25,8 @@ struct sprd_clk_desc {
 	struct sprd_clk_common		**clk_clks;
 	unsigned long			num_clk_clks;
 	struct clk_hw_onecell_data      *hw_clks;
+	struct sprd_reset_map		*resets;
+	unsigned long			num_resets;
 };
 
 static inline struct sprd_clk_common *

@@ -4,6 +4,7 @@ config SPRD_COMMON_CLK
 	depends on ARCH_SPRD || COMPILE_TEST
 	default ARCH_SPRD
 	select REGMAP_MMIO
+	select RESET_CONTROLLER
 
 if SPRD_COMMON_CLK
 
