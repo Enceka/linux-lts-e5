@@ -912,8 +912,6 @@ static int sprd_dsi_bind(struct device *dev, struct device *master, void *data)
 	struct sprd_dsi *dsi = dev_get_drvdata(dev);
 	int ret;
 
-	INIT_DELAYED_WORK(&dsi->fbdev_hotplug_work, sprd_dsi_fbdev_hotplug_work);
-
 	ret = sprd_dsi_encoder_init(drm, dsi);
 	if (ret)
 		goto cleanup_host;
@@ -1183,6 +1181,13 @@ static int sprd_dsi_probe(struct platform_device *pdev)
 		DRM_ERROR("failed to allocate dsi data.\n");
 		return -ENOMEM;
 	}
+
+	/*
+	 * Here rather than in bind: the panel may attach (and schedule this)
+	 * before the DRM master binds the DSI, as fw_devlink orders the probes
+	 * on 6.x.
+	 */
+	INIT_DELAYED_WORK(&dsi->fbdev_hotplug_work, sprd_dsi_fbdev_hotplug_work);
 
 	/*
 	 * FIXME:
