@@ -88,6 +88,15 @@ config TYPEC_HD3SS3220
 	  If you choose to build this driver as a dynamically linked module, the
 	  module will be called hd3ss3220.ko.
 
+config USB_SC27XX_TYPEC
+	tristate "Unisoc SC27XX/UMP96XX PMIC Type-C controller"
+	depends on MFD_SC27XX_PMIC || COMPILE_TEST
+	depends on EXTCON
+	help
+	  The Type-C v1.1 controller of the Unisoc SC27xx and UMP96xx PMICs:
+	  cable detection (the extcon device the USB controller follows),
+	  data and power roles.
+
 config TYPEC_STUSB160X
 	tristate "STMicroelectronics STUSB160x Type-C controller driver"
 	depends on USB_ROLE_SWITCH || !USB_ROLE_SWITCH
