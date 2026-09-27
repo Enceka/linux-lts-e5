@@ -1450,12 +1450,11 @@ static int sprd_panel_probe(struct mipi_dsi_device *slave)
 	struct device_node *bl_node, *oled_bl_node, *lcd_node;
 	int ret;
 
-	cabc_entry = proc_create("cabc1", 0644, NULL, &cabc_fops);
-
-	if(cabc_entry == NULL) {
-		DRM_ERROR("create cabc Failed!\n");
-	} else {
-		DRM_ERROR("create cabc  Succeed!\n");
+	/* once: a probe deferred for the backlight comes back here */
+	if (!cabc_entry) {
+		cabc_entry = proc_create("cabc1", 0644, NULL, &cabc_fops);
+		if (!cabc_entry)
+			DRM_ERROR("create cabc Failed!\n");
 	}
 
 	panel = devm_kzalloc(&slave->dev, sizeof(*panel), GFP_KERNEL);
@@ -1585,6 +1584,9 @@ static void sprd_panel_remove(struct mipi_dsi_device *slave)
 
 	//drm_panel_detach(&panel->base);
 	drm_panel_remove(&panel->base);
+
+	proc_remove(cabc_entry);
+	cabc_entry = NULL;
 }
 
 static const struct of_device_id panel_of_match[] = {
