@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Unisoc vendor ASoC stack, imported from
+# android_kernel_modules_and_devicetree_oppo_ums9230
+# (bsp/modules/kernel5.15/audio/sprd, plus vender/audio/fsa4480).
+#
+# This is a different stack from the mainline Spreadtrum ASoC drivers in the
+# parent directory (sprd-pcm-dma, sprd-mcdt): it is the one the stock image
+# actually ships and binds, and it sits on top of the DSP plumbing in
+# drivers/unisoc_platform/sprd_audio/.
+#
+# Only the modules this board binds are imported.  Left out from upstream:
+# the sc2721/sc2730 codecs, i2s/vaudio/sprd_dai DAIs, vbc r1p0v3, the i2s and
+# tdm machine drivers, the 2-stage dmaengine platform, and the third-party PA
+# codecs ucp1301, tfa98xx, sipa and frsm - none of which match this hardware.
+# aw87xxx is imported: that one is on the board.
+
+menuconfig SND_SOC_UNISOC
+	tristate "Unisoc vendor ASoC stack"
+	depends on SND_SOC && ARCH_SPRD
+	default n
+	help
+	  Vendor ASoC stack for Unisoc SoCs (UMS9621 and friends).  Enable the
+	  individual pieces below; they are built as separate modules to match
+	  the stock vendor_dlkm module set name for name.
+
+if SND_SOC_UNISOC
+
+config SND_SOC_UNISOC_PCM_ROUTING
+	tristate "Unisoc PCM routing (sprd-platform-pcm-routing.ko)"
+	help
+	  DAPM routing between the front-end DAIs and the back-ends.
+
+config SND_SOC_UNISOC_DMAENGINE_PCM
+	tristate "Unisoc dmaengine PCM platform (sprd-dmaengine-pcm.ko)"
+	depends on SND_SOC_UNISOC_PCM_ROUTING
+	help
+	  The normal (non-offload) PCM platform driver.
+
+config SND_SOC_UNISOC_COMPR_2STAGE_DMA
+	tristate "Unisoc compressed 2-stage DMA platform (sprd-compr-2stage-dma.ko)"
+	depends on UNISOC_AUDIO_MEM && UNISOC_AUDIO_SIPC
+	select SND_SOC_COMPRESS
+	help
+	  Compressed-audio playback path, offloaded to the audio DSP.
+
+config SND_SOC_UNISOC_VBC_V4
+	tristate "Unisoc VBC v4 back-end DAI (snd-soc-sprd-vbc-v4.ko)"
+	depends on SND_SOC_UNISOC_PCM_ROUTING
+	help
+	  Voice-band codec interface, v4 generation - the back-end DAIs and
+	  their register-level plumbing.
+
+config SND_SOC_UNISOC_VBC_FE
+	tristate "Unisoc VBC front-end DAI (snd-soc-sprd-vbc-fe.ko)"
+	depends on SND_SOC_UNISOC_VBC_V4
+	help
+	  The front-end DAIs that userspace opens as PCM devices.
+
+config SND_SOC_UNISOC_TDM
+	tristate "Unisoc TDM DAI (snd-soc-sprd-tdm.ko)"
+	depends on SND_SOC_UNISOC_DMAENGINE_PCM
+	help
+	  TDM interface DAI.
+
+config SND_SOC_UNISOC_DUMMY_CODEC
+	tristate "Unisoc dummy codec (snd-soc-sprd-dummy-codec.ko)"
+	help
+	  Placeholder codec for back-ends with nothing attached.
+
+config SND_SOC_UNISOC_HEADSET_FSA4480
+	tristate "FSA4480 USB-C audio switch (snd-soc-fsa4480.ko)"
+	depends on I2C
+	help
+	  Analog audio switch used on the USB-C headset path.  The stock
+	  ump9620 codec is built against this driver's header, so keep it
+	  enabled alongside SND_SOC_UNISOC_CODEC_UMP9620.
+
+config SND_SOC_UNISOC_PA_AW87XXX
+	tristate "Awinic AW87xxx speaker PA (snd-soc-sprd-pa-aw87xxx.ko)"
+	depends on I2C
+	help
+	  External speaker amplifier.  Present on this board at i2c-6 0x58
+	  (sysfs name "aw87xxx_pa"), and selected by the stock device tree:
+	  /sound@0 has sprd,spk-ext-pa-info = <0 1 1 0>, i.e. speaker hook
+	  index 1, which SND_SOC_UNISOC_CARD maps to the aw87xxx hook.
+	  Keep this enabled whenever SND_SOC_UNISOC_CARD is, or the card's
+	  aw87xxx_set_profile() reference goes unresolved.
+
+config SND_SOC_UNISOC_CODEC_UMP9620
+	tristate "Unisoc UMP9620 codec (snd-soc-sprd-codec-ump9620.ko)"
+	depends on SND_SOC_UNISOC_HEADSET_FSA4480
+	help
+	  Audio codec inside the UMP9620 PMIC, which is the PMIC on this
+	  board.
+
+config SND_SOC_UNISOC_CODEC_UMP9620_POWER
+	tristate "Unisoc UMP9620 codec power (snd-soc-sprd-codec-ump9620-power.ko)"
+	help
+	  Regulators feeding the UMP9620 codec block.
+
+config SND_SOC_UNISOC_CODEC_UMP9620_POWER_DEV
+	tristate "Unisoc UMP9620 codec power device (snd-soc-sprd-codec-ump9620-power-dev.ko)"
+	depends on SND_SOC_UNISOC_CODEC_UMP9620_POWER
+	help
+	  Registers the platform device the power driver above binds to.
+
+config SND_SOC_UNISOC_PDM_R2P0
+	tristate "Unisoc PDM r2p0 (snd-soc-sprd-pdm-r2p0.ko)"
+	help
+	  PDM digital microphone interface.  Present in the stock module set
+	  but binds nothing on this board.
+
+config SND_SOC_UNISOC_CARD
+	tristate "Unisoc machine driver (snd-soc-sprd-card.ko)"
+	depends on SND_SOC_UNISOC_VBC_FE && SND_SOC_UNISOC_CODEC_UMP9620
+	help
+	  The machine driver that ties the DAIs, platform and codec together
+	  into the sound card userspace sees.
+
+endif # SND_SOC_UNISOC

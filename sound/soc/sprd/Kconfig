@@ -17,4 +17,6 @@ config SND_SOC_SPRD_MCDT
 	  is used for sound stream transmission between audio subsystem
 	  and other AP/CP subsystem.
 
+source "sound/soc/sprd/unisoc/Kconfig"
+
 endmenu

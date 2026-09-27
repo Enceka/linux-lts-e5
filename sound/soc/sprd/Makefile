@@ -6,3 +6,6 @@ snd-soc-sprd-platform-y := sprd-pcm-dma.o sprd-pcm-compress.o
 obj-$(CONFIG_SND_SOC_SPRD) += snd-soc-sprd-platform.o
 
 obj-$(CONFIG_SND_SOC_SPRD_MCDT) += sprd-mcdt.o
+
+# the Unisoc audio stack of the E5's 5.15 tree
+obj-y += unisoc/

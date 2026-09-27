@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+ccflags-y += -I$(srctree)/sound/soc/sprd/unisoc/dai/vbc_v4/vbc_dai
+ccflags-y += -I$(srctree)/sound/soc/sprd/unisoc/platform/platform_routing
+ccflags-y += -I$(srctree)/sound/soc/sprd/unisoc/platform/dmaengine_pcm
+ccflags-y += -DCONFIG_UNISOC_AUDIO_MCDT_R2P0
+ccflags-y += -DCONFIG_UNISOC_AUDIO_MCDT_N6L
+ccflags-y += -DCONFIG_UNISOC_AUDIO_DNS_N6L
+obj-$(CONFIG_SND_SOC_UNISOC_VBC_FE) += snd-soc-sprd-vbc-fe.o
+snd-soc-sprd-vbc-fe-y := sprd-fe-dai.o
