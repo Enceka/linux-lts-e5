@@ -16,6 +16,7 @@
 #include <linux/arm-smccc.h>
 #include <linux/delay.h>
 #include <linux/module.h>
+#include <linux/pm_qos.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
@@ -51,7 +52,53 @@ struct trusty_state {
 	struct trusty_work __percpu *nop_works;
 	struct list_head nop_queue;
 	spinlock_t nop_lock; /* protects nop_queue */
+	struct delayed_work nop_poll;
+	unsigned long nop_poll_until;
+	struct pm_qos_request idle_qos;
+	bool idle_qos_active;
 };
+
+/*
+ * The Android kernel keeps the CPUs Trusty resides on out of PSCI power-down
+ * idle (the android_rvh_psci_* hooks of trusty-pm, SMC_FC_CPU_CAN_DOWN).
+ * Mainline has no such hook: a TA sleeping on the secure timer (e.g. the
+ * modem boot service waiting on hardware) then never runs again.  While
+ * requests are in flight, and for a while after, hold a CPU latency QoS
+ * request (WFI only) and give Trusty a NOP on every online CPU periodically
+ * (the "run me" SGI does not reach Linux either).
+ */
+static unsigned int nop_poll_ms = 10;
+module_param(nop_poll_ms, uint, 0644);
+static unsigned int nop_poll_hold_s = 10;
+module_param(nop_poll_hold_s, uint, 0644);
+
+static void trusty_nop_poll(struct work_struct *work)
+{
+	struct trusty_state *s = container_of(to_delayed_work(work), struct trusty_state, nop_poll);
+	unsigned int cpu;
+
+	for_each_online_cpu(cpu)
+		queue_work_on(cpu, s->nop_wq, &per_cpu_ptr(s->nop_works, cpu)->work);
+	if (nop_poll_ms && time_before(jiffies, s->nop_poll_until)) {
+		schedule_delayed_work(&s->nop_poll, msecs_to_jiffies(nop_poll_ms));
+	} else if (s->idle_qos_active) {
+		cpu_latency_qos_remove_request(&s->idle_qos);
+		s->idle_qos_active = false;
+	}
+}
+
+static void trusty_nop_poll_kick(struct trusty_state *s)
+{
+	if (!nop_poll_ms || !s->nop_wq)
+		return;
+	s->nop_poll_until = jiffies + nop_poll_hold_s * HZ;
+	if (!s->idle_qos_active) {
+		s->idle_qos_active = true;
+		cpu_latency_qos_add_request(&s->idle_qos, 0);
+	}
+	if (!delayed_work_pending(&s->nop_poll))
+		schedule_delayed_work(&s->nop_poll, msecs_to_jiffies(nop_poll_ms));
+}
 
 struct smc_param {
 	void *dev;
@@ -299,6 +346,7 @@ s32 trusty_std_call32(struct device *dev, u32 smcnr, u32 a0, u32 a1, u32 a2)
 	BUG_ON(SMC_IS_SMC64(smcnr));
 
 	if (smcnr != SMC_SC_NOP) {
+		trusty_nop_poll_kick(s);
 		mutex_lock(&s->smc_lock);
 		reinit_completion(&s->cpu_idle_completion);
 	}
@@ -583,6 +631,7 @@ static int trusty_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_api_version;
 
+	INIT_DELAYED_WORK(&s->nop_poll, trusty_nop_poll);
 	s->nop_wq = alloc_workqueue("trusty-nop-wq", WQ_CPU_INTENSIVE, 0);
 	if (!s->nop_wq) {
 		ret = -ENODEV;
@@ -646,6 +695,9 @@ static void trusty_remove(struct platform_device *pdev)
 
 	device_for_each_child(&pdev->dev, NULL, trusty_remove_child);
 
+	cancel_delayed_work_sync(&s->nop_poll);
+	if (s->idle_qos_active)
+		cpu_latency_qos_remove_request(&s->idle_qos);
 	for_each_possible_cpu(cpu) {
 		struct trusty_work *tw = per_cpu_ptr(s->nop_works, cpu);
 
