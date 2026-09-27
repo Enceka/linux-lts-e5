@@ -11,6 +11,10 @@
 /* PMIC global registers definition */
 #define SC27XX_MODULE_EN		0xc08
 #define SC2730_MODULE_EN		0x1808
+#define UMP962X_MODULE_EN		0x2008
+#define UMP962X_EFUSE_RTC		0x2010
+#define UMP962X_EFUSE_RTC_EN		BIT(11)
+#define UMP962X_CLK_GATE		BIT(3)
 #define SC27XX_EFUSE_EN			BIT(6)
 
 /* Efuse controller registers definition */
@@ -23,6 +27,8 @@
 #define SC27XX_EFUSE_WR_TIMING_CTRL	0x20
 #define SC27XX_EFUSE_RD_TIMING_CTRL	0x24
 #define SC27XX_EFUSE_EFUSE_DEB_CTRL	0x28
+/* UMP962x: the blocks, one register each */
+#define UMP962X_EFUSE_BLOCK(n)		(0x40 + 0x4 * (n))
 
 /* Mask definition for SC27XX_EFUSE_BLOCK_INDEX register */
 #define SC27XX_EFUSE_BLOCK_MASK		GENMASK(4, 0)
@@ -41,6 +47,8 @@
 
 /* Block number and block width (bytes) definitions */
 #define SC27XX_EFUSE_BLOCK_MAX		32
+#define UMP9620_EFUSE_BLOCK_MAX		64
+#define UMP9621_EFUSE_BLOCK_MAX		12
 #define SC27XX_EFUSE_BLOCK_WIDTH	2
 
 /* Timeout (ms) for the trylock of hardware spinlocks */
@@ -56,6 +64,9 @@
  */
 struct sc27xx_efuse_variant_data {
 	u32 module_en;
+	u32 block_max;
+	/* UMP962x: the blocks are registers, read after the RTC and clock enables */
+	bool block_regs;
 };
 
 struct sc27xx_efuse {
@@ -69,10 +80,24 @@ struct sc27xx_efuse {
 
 static const struct sc27xx_efuse_variant_data sc2731_edata = {
 	.module_en = SC27XX_MODULE_EN,
+	.block_max = SC27XX_EFUSE_BLOCK_MAX,
 };
 
 static const struct sc27xx_efuse_variant_data sc2730_edata = {
 	.module_en = SC2730_MODULE_EN,
+	.block_max = SC27XX_EFUSE_BLOCK_MAX,
+};
+
+static const struct sc27xx_efuse_variant_data ump9620_edata = {
+	.module_en = UMP962X_MODULE_EN,
+	.block_max = UMP9620_EFUSE_BLOCK_MAX,
+	.block_regs = true,
+};
+
+static const struct sc27xx_efuse_variant_data ump9621_edata = {
+	.module_en = UMP962X_MODULE_EN,
+	.block_max = UMP9621_EFUSE_BLOCK_MAX,
+	.block_regs = true,
 };
 
 /*
@@ -121,6 +146,53 @@ static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 bits)
 	return 0;
 }
 
+static int ump962x_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+{
+	struct sc27xx_efuse *efuse = context;
+	u32 buf, blk_index = offset / SC27XX_EFUSE_BLOCK_WIDTH;
+	u32 blk_offset = (offset % SC27XX_EFUSE_BLOCK_WIDTH) * BITS_PER_BYTE;
+	int ret;
+
+	if (blk_index >= efuse->var_data->block_max ||
+	    bytes > SC27XX_EFUSE_BLOCK_WIDTH)
+		return -EINVAL;
+
+	ret = sc27xx_efuse_lock(efuse);
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
+				 SC27XX_EFUSE_EN, SC27XX_EFUSE_EN);
+	if (ret)
+		goto unlock_efuse;
+
+	ret = regmap_update_bits(efuse->regmap, UMP962X_EFUSE_RTC,
+				 UMP962X_EFUSE_RTC_EN, UMP962X_EFUSE_RTC_EN);
+	if (!ret)
+		ret = regmap_update_bits(efuse->regmap, efuse->base,
+					 UMP962X_CLK_GATE, 0);
+	if (!ret)
+		ret = regmap_update_bits(efuse->regmap,
+					 efuse->base + SC27XX_EFUSE_MODE_CTRL,
+					 SC27XX_EFUSE_CLR_RDDONE,
+					 SC27XX_EFUSE_CLR_RDDONE);
+	if (!ret)
+		ret = regmap_read(efuse->regmap,
+				  efuse->base + UMP962X_EFUSE_BLOCK(blk_index), &buf);
+
+	regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
+			   SC27XX_EFUSE_EN, 0);
+unlock_efuse:
+	sc27xx_efuse_unlock(efuse);
+
+	if (!ret) {
+		buf >>= blk_offset;
+		memcpy(val, &buf, bytes);
+	}
+
+	return ret;
+}
+
 static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
 {
 	struct sc27xx_efuse *efuse = context;
@@ -128,7 +200,7 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
 	u32 blk_offset = (offset % SC27XX_EFUSE_BLOCK_WIDTH) * BITS_PER_BYTE;
 	int ret;
 
-	if (blk_index > SC27XX_EFUSE_BLOCK_MAX ||
+	if (blk_index > efuse->var_data->block_max ||
 	    bytes > SC27XX_EFUSE_BLOCK_WIDTH)
 		return -EINVAL;
 
@@ -243,8 +315,11 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
 	econfig.word_size = 1;
 	econfig.read_only = true;
 	econfig.name = "sc27xx-efuse";
-	econfig.size = SC27XX_EFUSE_BLOCK_MAX * SC27XX_EFUSE_BLOCK_WIDTH;
-	econfig.reg_read = sc27xx_efuse_read;
+	/* the UMS9621 boards have two, on the UMP9620 and the UMP9621 */
+	econfig.id = NVMEM_DEVID_AUTO;
+	econfig.size = efuse->var_data->block_max * SC27XX_EFUSE_BLOCK_WIDTH;
+	econfig.reg_read = efuse->var_data->block_regs ? ump962x_efuse_read :
+							    sc27xx_efuse_read;
 	econfig.priv = efuse;
 	econfig.dev = &pdev->dev;
 	econfig.add_legacy_fixed_of_cells = true;
@@ -260,6 +335,8 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
 static const struct of_device_id sc27xx_efuse_of_match[] = {
 	{ .compatible = "sprd,sc2731-efuse", .data = &sc2731_edata},
 	{ .compatible = "sprd,sc2730-efuse", .data = &sc2730_edata},
+	{ .compatible = "sprd,ump9620-efuse", .data = &ump9620_edata},
+	{ .compatible = "sprd,ump9621-efuse", .data = &ump9621_edata},
 	{ }
 };
 MODULE_DEVICE_TABLE(of, sc27xx_efuse_of_match);
