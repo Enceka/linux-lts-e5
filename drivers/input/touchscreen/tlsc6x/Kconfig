@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Chipsemi tlsc6x touchscreen (Rongyue E5, 320x480 panel on i2c-3 @0x2e).
+#
+# The chip driver was originally written against a vendor touchscreen framework
+# and the stock image ships it as a standalone tlsc6x.ko, loaded from the
+# vendor_boot first stage.  tlsc6x_core.c provides the small part of that
+# framework the driver really uses, so no vendor framework is required.
+#
+
+config TOUCHSCREEN_TLSC6X
+	tristate "Chipsemi tlsc6x touchscreen"
+	depends on I2C
+	help
+	  Say Y here if you have a Chipsemi tlsc6x touch panel.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called tlsc6x.ko (this is what the stock vendor_boot ramdisk loads).
