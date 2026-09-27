@@ -1759,6 +1759,20 @@ config REGULATOR_RZG2L_VBCTRL
 	help
 	  Support for VBUS regulators implemented on Renesas RZ/G2L SoCs.
 
+config REGULATOR_UMP9620
+	tristate "Unisoc UMP9620 power regulator driver"
+	depends on MFD_SC27XX_PMIC || COMPILE_TEST
+	help
+	  This driver provides support for the voltage regulators on the
+	  UMP9620 PMIC.
+
+config REGULATOR_UMP9621
+	tristate "Unisoc UMP9621 power regulator driver"
+	depends on MFD_SC27XX_PMIC || COMPILE_TEST
+	help
+	  This driver provides support for the voltage regulators on the
+	  UMP9621 PMIC.
+
 config REGULATOR_VCTRL
 	tristate "Voltage controlled regulators"
 	depends on OF
