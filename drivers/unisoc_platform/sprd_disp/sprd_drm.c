@@ -338,6 +338,8 @@ static const struct file_operations sprd_drm_fops = {
 	.read		= drm_read,
 	.llseek		= noop_llseek,
 	.mmap		= sprd_gem_mmap,
+	/* drm_open() refuses fops without it (DEFINE_DRM_GEM_FOPS has it) */
+	.fop_flags	= FOP_UNSIGNED_OFFSET,
 };
 
 static struct drm_driver sprd_drm_drv = {
