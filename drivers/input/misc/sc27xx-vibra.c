@@ -182,6 +182,8 @@ static const struct of_device_id sc27xx_vibra_of_match[] = {
 	{ .compatible = "sprd,sc2721-vibrator", .data = &sc2721_data },
 	{ .compatible = "sprd,sc2730-vibrator", .data = &sc2730_data },
 	{ .compatible = "sprd,sc2731-vibrator", .data = &sc2731_data },
+	/* the UMP9620 PMIC's vibrator LDO has the SC2730's bits */
+	{ .compatible = "sprd,ump9620-vibrator", .data = &sc2730_data },
 	{}
 };
 MODULE_DEVICE_TABLE(of, sc27xx_vibra_of_match);
