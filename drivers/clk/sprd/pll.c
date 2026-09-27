@@ -267,3 +267,185 @@ const struct clk_ops sprd_pll_ops = {
 	.set_rate = sprd_pll_set_rate,
 };
 EXPORT_SYMBOL_GPL(sprd_pll_ops);
+
+/*
+ * The frequency-table plls (UMS9621 generation), as Unisoc's 5.15 tree
+ * computes them: N in MHz of the reference (not 10 MHz), a reference divider
+ * (PLL_REFDIV halves the reference), and with fflag 1 a postdiv that divides
+ * by (postdiv + 1); ibias and the vco selection come from the rows of
+ * pll->ftable.
+ */
+static const struct freq_table *pll_ftable_row(u64 rate, const struct freq_table *table)
+{
+	u32 i;
+
+	for (i = 0; table[i].ibias < INVALID_MAX_IBIAS; i++)
+		if (rate <= table[i].max_freq)
+			break;
+
+	return &table[i];
+}
+
+static unsigned long sprd_pll_ftable_recalc_rate(struct clk_hw *hw,
+						 unsigned long parent_rate)
+{
+	struct sprd_pll *pll = hw_to_sprd_pll(hw);
+	u32 *cfg;
+	u32 i, mask, regs_num = pll->regs_num;
+	unsigned long rate, nint, kint = 0, postdiv;
+	u64 refin;
+
+	cfg = kcalloc(regs_num, sizeof(*cfg), GFP_KERNEL);
+	if (!cfg)
+		return parent_rate;
+
+	for (i = 0; i < regs_num; i++)
+		cfg[i] = sprd_pll_read(pll, i);
+
+	refin = pll_get_refin(pll);
+
+	if (pinternal(pll, cfg, PLL_REFDIV))
+		refin = refin / 2;
+
+	if (pinternal(pll, cfg, PLL_PREDIV))
+		refin = refin * 2;
+
+	if (!pinternal(pll, cfg, PLL_DIV_S)) {
+		rate = refin * pinternal_val(pll, cfg, PLL_N) * CLK_PLL_1M;
+	} else {
+		nint = pinternal_val(pll, cfg, PLL_NINT);
+		if (pinternal(pll, cfg, PLL_SDM_EN))
+			kint = pinternal_val(pll, cfg, PLL_KINT);
+		mask = pmask(pll, PLL_KINT);
+
+		rate = DIV_ROUND_CLOSEST_ULL(refin * kint * pll->k1,
+					     ((mask >> __ffs(mask)) + 1)) *
+					     pll->k2 + refin * nint * CLK_PLL_1M;
+	}
+
+	if (pwidth(pll, PLL_POSTDIV)) {
+		if (pll->fflag == 1 && pinternal(pll, cfg, PLL_POSTDIV)) {
+			postdiv = pinternal_val(pll, cfg, PLL_POSTDIV);
+			rate = rate / (postdiv + 1);
+		} else if (!pll->fflag && !pinternal(pll, cfg, PLL_POSTDIV)) {
+			rate = rate / 2;
+		}
+	}
+
+	kfree(cfg);
+	return rate;
+}
+
+static void pll_cfg_set(const struct sprd_pll *pll, struct reg_cfg *cfg,
+			int member, u32 val)
+{
+	u32 index = pindex(pll, member);
+
+	cfg[index].val |= (val << pshift(pll, member)) & pmask(pll, member);
+	cfg[index].msk |= pmask(pll, member);
+}
+
+static int sprd_pll_ftable_set_rate(struct clk_hw *hw, unsigned long rate,
+				    unsigned long parent_rate)
+{
+	struct sprd_pll *pll = hw_to_sprd_pll(hw);
+	const struct freq_table *row;
+	struct reg_cfg *cfg;
+	int ret = 0;
+	u32 mask, shift, index;
+	u32 regs_num = pll->regs_num, i;
+	unsigned long nint, kint;
+	u64 tmp, rem, refin, fvco = rate, postdiv;
+
+	cfg = kcalloc(regs_num, sizeof(*cfg), GFP_KERNEL);
+	if (!cfg)
+		return -ENOMEM;
+
+	refin = pll_get_refin(pll);
+
+	mask = pmask(pll, PLL_PREDIV);
+	index = pindex(pll, PLL_PREDIV);
+	if (pwidth(pll, PLL_PREDIV) && (sprd_pll_read(pll, index) & mask))
+		refin = refin * 2;
+
+	if (pwidth(pll, PLL_POSTDIV)) {
+		mask = pmask(pll, PLL_POSTDIV);
+		shift = pshift(pll, PLL_POSTDIV);
+		index = pindex(pll, PLL_POSTDIV);
+		cfg[index].msk |= mask;
+		if (pll->fflag == 1 && fvco && fvco <= pll->fvco) {
+			tmp = pll->fvco;
+			do_div(tmp, fvco);
+			postdiv = tmp;
+			if ((mask >> shift) < postdiv) {
+				kfree(cfg);
+				return -EINVAL;
+			}
+			cfg[index].val |= (postdiv << shift) & mask;
+			fvco = fvco * (postdiv + 1);
+		} else if (pll->fflag == 0) {
+			if (fvco > pll->fvco)
+				cfg[index].val |= mask;
+			else
+				fvco = fvco * 2;
+		}
+	}
+
+	if (pwidth(pll, PLL_REFDIV)) {
+		tmp = fvco;
+		/* a vco that is no multiple of 26 MHz runs from half the reference */
+		if (do_div(tmp, 26 * CLK_PLL_1M)) {
+			refin = refin / 2;
+			pll_cfg_set(pll, cfg, PLL_REFDIV, 1);
+		} else {
+			pll_cfg_set(pll, cfg, PLL_REFDIV, 0);
+		}
+	}
+
+	row = pll_ftable_row(fvco, pll->ftable);
+	pll_cfg_set(pll, cfg, PLL_IBIAS, row->ibias);
+	if (pwidth(pll, PLL_VCOSEL))
+		pll_cfg_set(pll, cfg, PLL_VCOSEL, row->vco_sel);
+
+	tmp = fvco;
+	rem = do_div(tmp, refin * CLK_PLL_1M);
+	nint = tmp;
+	if (!rem) {
+		/* an integer multiple: N, without the sigma-delta modulator */
+		pll_cfg_set(pll, cfg, PLL_N, nint);
+		pll_cfg_set(pll, cfg, PLL_DIV_S, 0);
+		pll_cfg_set(pll, cfg, PLL_SDM_EN, 0);
+	} else {
+		pll_cfg_set(pll, cfg, PLL_DIV_S, 1);
+		pll_cfg_set(pll, cfg, PLL_SDM_EN, 1);
+		pll_cfg_set(pll, cfg, PLL_NINT, nint);
+		mask = pmask(pll, PLL_KINT);
+		shift = pshift(pll, PLL_KINT);
+		do_div(rem, 10000);
+		rem = rem * ((mask >> shift) + 1);
+		kint = DIV_ROUND_CLOSEST_ULL(rem, refin * 100);
+		pll_cfg_set(pll, cfg, PLL_KINT, kint);
+	}
+
+	for (i = 0; i < regs_num; i++) {
+		if (cfg[i].msk) {
+			sprd_pll_write(pll, i, cfg[i].msk, cfg[i].val);
+			ret |= SPRD_PLL_WRITE_CHECK(pll, i, cfg[i].msk,
+						   cfg[i].val);
+		}
+	}
+
+	if (!ret)
+		udelay(pll->udelay);
+
+	kfree(cfg);
+	return ret;
+}
+
+const struct clk_ops sprd_pll_ftable_ops = {
+	.prepare = sprd_pll_clk_prepare,
+	.recalc_rate = sprd_pll_ftable_recalc_rate,
+	.determine_rate = sprd_pll_determine_rate,
+	.set_rate = sprd_pll_ftable_set_rate,
+};
+EXPORT_SYMBOL_GPL(sprd_pll_ftable_ops);

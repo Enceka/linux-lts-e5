@@ -20,6 +20,25 @@ struct clk_bit_field {
 	u8 width;
 };
 
+/*
+ * struct freq_table - one row of a pll frequency table (the UMS9621 generation)
+ *
+ * @ibias:	the ibias setting for rates up to @max_freq
+ * @max_freq:	the highest vco rate of this row
+ * @vco_sel:	the vco selection for rates up to @max_freq
+ *
+ * A table ends with a row whose ibias is INVALID_MAX_IBIAS.
+ */
+struct freq_table {
+	u32 ibias;
+	u64 max_freq;
+	u32 vco_sel;
+};
+
+#define INVALID_MAX_IBIAS		0xff
+#define INVALID_MAX_FREQ		0xffffffff
+#define INVALID_MAX_VCO_SEL		0xff
+
 enum {
 	PLL_LOCK_DONE,
 	PLL_DIV_S,
@@ -32,6 +51,9 @@ enum {
 	PLL_KINT,
 	PLL_PREDIV,
 	PLL_POSTDIV,
+	/* used by the frequency-table plls only */
+	PLL_REFDIV,
+	PLL_VCOSEL,
 
 	PLL_FACT_MAX
 };
@@ -43,6 +65,7 @@ enum {
  *		reg[0] shows how many registers this pll clock uses.
  * @itable:	pll ibias table, itable[0] means how many items this
  *		table includes
+ * @ftable:	pll frequency table (sprd_pll_ftable_ops), instead of @itable
  * @udelay	delay time after setting rate
  * @factors	used to calculate the pll clock rate
  * @fvco:	fvco threshold rate
@@ -51,6 +74,7 @@ enum {
 struct sprd_pll {
 	u32 regs_num;
 	const u64 *itable;
+	const struct freq_table *ftable;
 	const struct clk_bit_field *factors;
 	u16 udelay;
 	u16 k1;
@@ -115,6 +139,48 @@ struct sprd_pll {
 			    _itable, _factors, _udelay, _k1, _k2,	\
 			    _fflag, _fvco, CLK_HW_INIT_HW)
 
+/*
+ * The frequency-table plls (UMS9621): N counts in MHz of the reference, an
+ * optional reference divider and vco selection, and a postdiv that divides
+ * by (postdiv + 1) when fflag is 1.
+ */
+#define SPRD_PLL_FTABLE_HW_INIT_FN(_struct, _name, _parent, _reg,	\
+				   _regs_num, _ftable, _factors,	\
+				   _udelay, _k1, _k2, _fflag,		\
+				   _fvco, _fn)				\
+	struct sprd_pll _struct = {				\
+		.regs_num	= _regs_num,			\
+		.ftable		= _ftable,			\
+		.factors	= _factors,			\
+		.udelay		= _udelay,			\
+		.k1		= _k1,				\
+		.k2		= _k2,				\
+		.fflag		= _fflag,			\
+		.fvco		= _fvco,			\
+		.common		= {				\
+			.regmap		= NULL,			\
+			.reg		= _reg,			\
+			.hw.init	= _fn(_name, _parent,	\
+					      &sprd_pll_ftable_ops, 0),\
+		},						\
+	}
+
+#define SPRD_PLL_FTABLE_FW_NAME(_struct, _name, _parent, _reg,		\
+				_regs_num, _ftable, _factors, _udelay,	\
+				_k1, _k2, _fflag, _fvco)		\
+	SPRD_PLL_FTABLE_HW_INIT_FN(_struct, _name, _parent, _reg,	\
+				   _regs_num, _ftable, _factors,	\
+				   _udelay, _k1, _k2, _fflag, _fvco,	\
+				   CLK_HW_INIT_FW_NAME)
+
+#define SPRD_PLL_FTABLE_HW(_struct, _name, _parent, _reg, _regs_num,	\
+			   _ftable, _factors, _udelay, _k1, _k2,	\
+			   _fflag, _fvco)				\
+	SPRD_PLL_FTABLE_HW_INIT_FN(_struct, _name, _parent, _reg,	\
+				   _regs_num, _ftable, _factors,	\
+				   _udelay, _k1, _k2, _fflag, _fvco,	\
+				   CLK_HW_INIT_HW)
+
 static inline struct sprd_pll *hw_to_sprd_pll(struct clk_hw *hw)
 {
 	struct sprd_clk_common *common = hw_to_sprd_clk_common(hw);
@@ -123,5 +189,6 @@ static inline struct sprd_pll *hw_to_sprd_pll(struct clk_hw *hw)
 }
 
 extern const struct clk_ops sprd_pll_ops;
+extern const struct clk_ops sprd_pll_ftable_ops;
 
 #endif /* _SPRD_PLL_H_ */
