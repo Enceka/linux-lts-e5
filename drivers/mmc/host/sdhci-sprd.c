@@ -877,6 +877,16 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 		host->mmc->ocr_avail_mmc &= ocr_mask;
 	}
 
+	/*
+	 * A controller for an SDIO chip only (the Wi-Fi/BT combo chip: no-sd,
+	 * no-mmc) is not polled for a card: the chip's driver powers it and
+	 * asks for the scan (mmc_detect_change()).  Polled, a powered-off chip
+	 * times out every second, each time with a register dump.
+	 */
+	if ((host->mmc->caps2 & MMC_CAP2_NO_SD) &&
+	    (host->mmc->caps2 & MMC_CAP2_NO_MMC))
+		host->mmc->caps &= ~MMC_CAP_NEEDS_POLL;
+
 	sprd_host->flags = host->flags;
 
 	hsq = devm_kzalloc(&pdev->dev, sizeof(*hsq), GFP_KERNEL);
