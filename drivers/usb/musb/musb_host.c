@@ -19,6 +19,8 @@
 #include <linux/dma-mapping.h>
 
 #include "musb_core.h"
+/* musb_set_utmi_60m_flag(), for the Unisoc PHY */
+#include <linux/usb/sprd_usbm.h>
 #include "musb_host.h"
 #include "musb_trace.h"
 
@@ -2705,6 +2707,17 @@ int musb_host_alloc(struct musb *musb)
 	musb->hcd->uses_new_polling = 1;
 	musb->hcd->has_tt = 1;
 
+	/*
+	 * Vendor hooks.  The sprd port (musb_sprd.c, sprd_musbhsdma.c) calls
+	 * into the host code through these pointers, so they have to be filled
+	 * in here: a NULL one is not a no-op, it is a jump to address 0.
+	 * Only the two functions that exist in this tree are wired up -
+	 * hops.host_start and hops.rx_dma_program have no implementation here
+	 * and stay NULL, so every caller has to test for that.
+	 */
+	musb->hops.advance_schedule = musb_advance_schedule;
+	musb->hops.tx_dma_program = musb_tx_dma_program;
+
 	return 0;
 }
 
@@ -2714,6 +2727,7 @@ void musb_host_cleanup(struct musb *musb)
 		return;
 	usb_remove_hcd(musb->hcd);
 }
+EXPORT_SYMBOL_GPL(musb_host_cleanup);
 
 void musb_host_free(struct musb *musb)
 {
@@ -2749,6 +2763,15 @@ int musb_host_setup(struct musb *musb, int power_budget)
 	device_wakeup_enable(hcd->self.controller);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(musb_host_setup);
+
+static bool musb_utmi_60m_flag;
+
+void musb_set_utmi_60m_flag(bool flag)
+{
+	musb_utmi_60m_flag = flag;
+}
+EXPORT_SYMBOL(musb_set_utmi_60m_flag);
 
 void musb_host_resume_root_hub(struct musb *musb)
 {

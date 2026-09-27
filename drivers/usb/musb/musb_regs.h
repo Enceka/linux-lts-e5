@@ -242,6 +242,17 @@
 #define MUSB_HS_EOF1		0x7c	/* 8 bit */
 #define MUSB_FS_EOF1		0x7d	/* 8 bit */
 #define MUSB_LS_EOF1		0x7e	/* 8 bit */
+#define MUSB_SOFT_RST		0x7f	/* 8 bit */
+
+#define MUSB_DMA_CNTLn(n)		(0x204 + (n - 1) * 0x10)	/* 16 bit */
+#define MUSB_DMA_ADDRn(n)		(0x208 + (n - 1) * 0x10)	/* 32 bit */
+#define MUSB_DMA_COUNTn(n)		(0x20C + (n - 1) * 0x10)	/* 32 bit */
+
+#define MUSB_C_T_HSBT		0x348	/* 32 bit */
+
+/* Offsets to MUSB_C_T_HSBT registers */
+#define MUSB_CLEAR_RXBUFF_EN 0x20000000
+#define MUSB_CLEAR_TXBUFF_EN 0x10000000
 
 /* Offsets to endpoint registers */
 #define MUSB_TXMAXP		0x00
