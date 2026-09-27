@@ -11,10 +11,14 @@
 #define SC27XX_MODULE_EN0	0xc08
 #define SC27XX_CLK_EN0		0xc18
 #define SC27XX_RGB_CTRL		0xebc
+#define UMP9620_MODULE_EN0	0x2008
+#define UMP9620_CLK_EN0		0x2010
 
 #define SC27XX_BLTC_EN		BIT(9)
 #define SC27XX_RTC_EN		BIT(7)
 #define SC27XX_RGB_PD		BIT(0)
+/* the UMP9620 has the RGB power-down in the controller's own control register */
+#define UMP9620_RGB_PD		BIT(12)
 
 /* Breathing light controller register definition */
 #define SC27XX_LEDS_CTRL	0x00
@@ -62,21 +66,50 @@ struct sc27xx_led_priv {
 #define to_sc27xx_led(ldev) \
 	container_of(ldev, struct sc27xx_led, ldev)
 
-static int sc27xx_led_init(struct regmap *regmap)
+/*
+ * Where the PMIC enables the controller and its clock, and powers the RGB
+ * driver up: rgb_ctrl is a global register, or 0 for the controller's own
+ * control register (base + SC27XX_LEDS_CTRL).
+ */
+struct sc27xx_bltc_data {
+	u32 module_en;
+	u32 clk_en;
+	u32 rgb_ctrl;
+	u32 rgb_pd;
+};
+
+static const struct sc27xx_bltc_data sc2731_bltc_data = {
+	.module_en = SC27XX_MODULE_EN0,
+	.clk_en = SC27XX_CLK_EN0,
+	.rgb_ctrl = SC27XX_RGB_CTRL,
+	.rgb_pd = SC27XX_RGB_PD,
+};
+
+static const struct sc27xx_bltc_data ump9620_bltc_data = {
+	.module_en = UMP9620_MODULE_EN0,
+	.clk_en = UMP9620_CLK_EN0,
+	.rgb_ctrl = 0,
+	.rgb_pd = UMP9620_RGB_PD,
+};
+
+static int sc27xx_led_init(struct sc27xx_led_priv *priv,
+			   const struct sc27xx_bltc_data *data)
 {
+	struct regmap *regmap = priv->regmap;
 	int err;
 
-	err = regmap_update_bits(regmap, SC27XX_MODULE_EN0, SC27XX_BLTC_EN,
+	err = regmap_update_bits(regmap, data->module_en, SC27XX_BLTC_EN,
 				 SC27XX_BLTC_EN);
 	if (err)
 		return err;
 
-	err = regmap_update_bits(regmap, SC27XX_CLK_EN0, SC27XX_RTC_EN,
+	err = regmap_update_bits(regmap, data->clk_en, SC27XX_RTC_EN,
 				 SC27XX_RTC_EN);
 	if (err)
 		return err;
 
-	return regmap_update_bits(regmap, SC27XX_RGB_CTRL, SC27XX_RGB_PD, 0);
+	return regmap_update_bits(regmap, data->rgb_ctrl ?: priv->base + SC27XX_LEDS_CTRL,
+				  data->rgb_pd, 0);
 }
 
 static u32 sc27xx_led_get_offset(struct sc27xx_led *leds)
@@ -242,7 +275,7 @@ static int sc27xx_led_register(struct device *dev, struct sc27xx_led_priv *priv)
 {
 	int i, err;
 
-	err = sc27xx_led_init(priv->regmap);
+	err = sc27xx_led_init(priv, of_device_get_match_data(dev));
 	if (err)
 		return err;
 
@@ -333,7 +366,8 @@ static void sc27xx_led_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id sc27xx_led_of_match[] = {
-	{ .compatible = "sprd,sc2731-bltc", },
+	{ .compatible = "sprd,sc2731-bltc", .data = &sc2731_bltc_data },
+	{ .compatible = "sprd,ump9620-bltc", .data = &ump9620_bltc_data },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, sc27xx_led_of_match);
