@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Unisoc platform drivers from Unisoc's android13-5.15 tree (drivers/unisoc_platform/), as shipped for the
+# Rongyue E5 (UMS9621): only the parts this tree has ported, under the vendor's paths and symbols.
+#
+menu "Unisoc platform drivers"
+	depends on ARCH_SPRD || COMPILE_TEST
+
+source "drivers/unisoc_platform/modem/Kconfig"
+
+endmenu

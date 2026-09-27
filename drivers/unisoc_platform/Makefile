@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Unisoc's drivers export functions they declare nowhere (the vendor tree has no prototypes for most of them):
+# 6.8's default -Wmissing-prototypes would report every one.
+subdir-ccflags-y += -Wno-missing-prototypes -Wno-missing-declarations
+
+obj-y				+= modem/
