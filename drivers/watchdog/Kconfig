@@ -1076,6 +1076,16 @@ config REALTEK_OTTO_WDT
 
 	  When built as a module this will be called realtek_otto_wdt.
 
+config UMP9620_PMIC_WATCHDOG
+	tristate "Unisoc UMP9620 PMIC watchdog"
+	depends on MFD_SC27XX_PMIC || COMPILE_TEST
+	select WATCHDOG_CORE
+	help
+	  The watchdog of the UMP9620 PMIC (UMS9620, UMS9621).  The bootloader
+	  arms it for 300 s, and on Android the PM co-processor's firmware keeps
+	  it fed; this driver takes it over instead, and the watchdog core
+	  feeds it until userspace opens /dev/watchdog.
+
 config SPRD_WATCHDOG
 	tristate "Spreadtrum watchdog support"
 	depends on ARCH_SPRD || COMPILE_TEST
