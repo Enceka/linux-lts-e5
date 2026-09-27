@@ -22,3 +22,5 @@ obj-$(CONFIG_USB_MXS_PHY)		+= phy-mxs-usb.o
 obj-$(CONFIG_USB_ULPI)			+= phy-ulpi.o
 obj-$(CONFIG_USB_ULPI_VIEWPORT)		+= phy-ulpi-viewport.o
 obj-$(CONFIG_KEYSTONE_USB_PHY)		+= phy-keystone.o
+obj-$(CONFIG_SPRD_BC1P2)		+= sprd-bc1p2.o
+obj-$(CONFIG_SPRD_QOGIRN6LITE_USB2_PHY)	+= phy-sprd-qogirn6lite.o
