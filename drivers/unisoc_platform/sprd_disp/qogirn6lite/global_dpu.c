@@ -308,7 +308,7 @@ static int dpu_clk_init(struct dpu_context *ctx)
 	if (panel->info.dpi_clk_pixelpll) {
 		clk_pixelpll_div = calc_div_of_pixelpll(ctx->vm.pixelclock);
 
-		pr_info("clk_pixelpll_div is %u, dpi clk is %u\n",
+		pr_info("clk_pixelpll_div is %u, dpi clk is %lu\n",
 				clk_pixelpll_div, ctx->vm.pixelclock);
 	} else if (dpu->dsi->ctx.dpi_clk_div) {
 		pr_info("DPU_CORE_CLK = %u, DPI_CLK_DIV = %d\n",
@@ -317,7 +317,7 @@ static int dpu_clk_init(struct dpu_context *ctx)
 		dpi_src_val = calc_dpi_clk_src(ctx->actual_dpi_clk);
 		pr_info("DPU_CORE_CLK = %u, DPI_CLK_SRC = %u\n",
 				dpu_core_val, dpi_src_val);
-		pr_info("dpi vm clock is %lu, dpi actual clock is %lu\n",
+		pr_info("dpi vm clock is %lu, dpi actual clock is %u\n",
 				ctx->vm.pixelclock, ctx->actual_dpi_clk);
 	}else {
 		dpi_src_val = calc_dpi_clk_src(ctx->vm.pixelclock);
@@ -348,7 +348,7 @@ static int dpu_clk_init(struct dpu_context *ctx)
 			if (ret)
 				pr_err("dpu update dsc clk rate failed\n");
 
-			pr_info("clk_dpu_dsc = %u, dsc_core = %d\n",
+			pr_info("clk_dpu_dsc = %lu, dsc_core = %d\n",
 				ctx->vm.pixelclock/dsc_core, dsc_core);
 		}
 	} else if (dpu->dsi->ctx.dpi_clk_div) {
@@ -391,7 +391,7 @@ static int dpu_clk_init(struct dpu_context *ctx)
 			if (ret)
 				pr_err("dpu update dsc clk rate failed\n");
 
-			pr_info("clk_dpu_dsc_src = %u, clk_dpu_dsc = %u, dsc_core = %d\n",
+			pr_info("clk_dpu_dsc_src = %u, clk_dpu_dsc = %lu, dsc_core = %d\n",
 				dpi_src_val, ctx->vm.pixelclock/dsc_core, dsc_core);
 		}
 	}
@@ -573,7 +573,7 @@ static int dpu_dpi_vrr(struct dpu_context *ctx, u32 dst_dpi_clk)
 	dsc_core = ctx->vm.hactive / panel->info.slice_width;
 
 	dpi_src_val = calc_dpi_clk_src(dst_dpi_clk);
-	pr_info("set dpi clock to %lu\n", dst_dpi_clk);
+	pr_info("set dpi clock to %u\n", dst_dpi_clk);
 
 	clk_src = val_to_clk(clk_ctx, dpi_src_val);
 	ret = clk_set_parent(clk_ctx->clk_dpu_dpi, clk_src);

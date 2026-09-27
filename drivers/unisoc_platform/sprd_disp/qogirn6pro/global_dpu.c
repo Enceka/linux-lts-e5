@@ -207,7 +207,7 @@ static int dpu_clk_init(struct dpu_context *ctx)
 		dpi_src_val = calc_dpi_clk_src(ctx->actual_dpi_clk);
 		pr_info("DPU_CORE_CLK = %u, DPI_CLK_SRC = %u\n",
 				dpu_core_val, dpi_src_val);
-		pr_info("dpi vm clock is %lu, dpi actual clock is %lu\n",
+		pr_info("dpi vm clock is %lu, dpi actual clock is %u\n",
 				ctx->vm.pixelclock, ctx->actual_dpi_clk);
 	} else {
 		dpi_src_val = calc_dpi_clk_src(ctx->vm.pixelclock);

@@ -545,7 +545,7 @@ static ssize_t actual_fps_show(struct device *dev,
 		temp = (tf->ts[i].tv_sec - tf->ts[j].tv_sec) * 1000000LL
 			+ (tf->ts[i].tv_nsec - tf->ts[j].tv_nsec) / 1000;
 		up(&dpu->ctx.lock);
-		return snprintf(buf, PAGE_SIZE, "%u.%u\n",
+		return snprintf(buf, PAGE_SIZE, "%llu.%llu\n",
 			1000000LL / temp, 100000000LL / temp % 100);
 	} else {
 		for (cnt = tf->sum_num; cnt > 0; --cnt) {
@@ -559,7 +559,7 @@ static ssize_t actual_fps_show(struct device *dev,
 	}
 
 	up(&dpu->ctx.lock);
-	return snprintf(buf, PAGE_SIZE, "avg:%u.%u\n", average / 100, average % 100);
+	return snprintf(buf, PAGE_SIZE, "avg:%llu.%llu\n", average / 100, average % 100);
 }
 static DEVICE_ATTR_RW(actual_fps);
 #endif

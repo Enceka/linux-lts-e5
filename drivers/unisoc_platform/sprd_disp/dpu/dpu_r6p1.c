@@ -744,10 +744,10 @@ static u32 dpu_isr(struct dpu_context *ctx)
 
 			if (ctx->dpu_run_flag) {
 				if (gap < ctx->te_int_min_gap) {
-					pr_warn("dpu te int occur inappropriate, skip this frame, gap is :%ld, min gap is %ld\n", gap, ctx->te_int_min_gap);
+					pr_warn("dpu te int occur inappropriate, skip this frame, gap is :%lld, min gap is %d\n", gap, ctx->te_int_min_gap);
 					ctx->dpu_run_flag = false;
 				} else if (gap > ctx->te_int_max_gap) {
-					pr_warn("dpu te int occur too late, skip this frame, gap is :%ld, max gap is %ld,\n", gap, ctx->te_int_max_gap);
+					pr_warn("dpu te int occur too late, skip this frame, gap is :%lld, max gap is %d,\n", gap, ctx->te_int_max_gap);
 					ctx->dpu_run_flag = false;
 					ctx->evt_te_update = true;
 					wake_up_interruptible_all(&ctx->te_update_wq);
