@@ -1,0 +1,11 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-drm-y += \
+    dpu/dpu_lite_r1p0.o \
+	dpu/dpu_lite_r2p0.o \
+	dpu/dpu_r2p0.o \
+	dpu/dpu_r4p0.o \
+	dpu/dpu_r5p0.o \
+	dpu/dpu_r6p0.o \
+	dpu/dpu_r6p1.o

@@ -1,0 +1,4 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-gsp-y += gsp_r8p0/gsp_r8p0_core.o

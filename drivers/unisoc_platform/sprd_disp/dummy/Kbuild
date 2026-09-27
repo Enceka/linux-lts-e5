@@ -1,0 +1,6 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-drm-y += \
+	dummy/dummy_crtc.o \
+	dummy/dummy_connector.o

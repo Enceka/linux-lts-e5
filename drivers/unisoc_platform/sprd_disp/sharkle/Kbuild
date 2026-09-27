@@ -1,0 +1,7 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-drm-y += \
+	sharkle/global_dpu.o \
+	sharkle/global_dsi.o \
+	sharkle/global_dphy.o

@@ -1,0 +1,13 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-drm-y += \
+	dp/dp_api.o \
+	dp/dp_aux.o \
+	dp/dp_core.o \
+	dp/dp_link.o \
+	dp/dp_test.o \
+	dp/dp_video.o \
+	dp/dw_dptx.o \
+	dp/dp_audio.o
+	#dp/dp_hdcp.o

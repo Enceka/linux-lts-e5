@@ -1,0 +1,7 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-drm-y += \
+    dphy/sprd_dphy_api.o \
+    dphy/pll/megacores_sharkle.o \
+    dphy/pll/megacores_sharkl5.o

@@ -1,0 +1,7 @@
+#SPDX-FileCopyrightText: 2020 Unisoc (Shanghai) Technologies Co.Ltd
+#SPDX-License-Identifier: GPL-2.0-only
+
+sprd-drm-y += \
+	qogirl6/global_dpu.o \
+	qogirl6/global_dsi.o \
+	qogirl6/global_dphy.o

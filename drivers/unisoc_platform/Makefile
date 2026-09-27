@@ -9,3 +9,5 @@ obj-y				+= sprd_time_sync/
 obj-$(CONFIG_UNISOC_WCN_BSP)	+= sprdwcn/
 obj-$(CONFIG_UNISOC_WLAN_COMBO)	+= sprd_wlan_combo/
 obj-$(CONFIG_UNISOC_WCN_BT)	+= sprd_bt/
+obj-$(CONFIG_UNISOC_DISP)	+= sprd_disp/
+obj-$(CONFIG_UNISOC_IOMMU)	+= iommu/

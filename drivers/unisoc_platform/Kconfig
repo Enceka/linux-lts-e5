@@ -13,5 +13,6 @@ source "drivers/unisoc_platform/sprdwcn/Kconfig"
 source "drivers/unisoc_platform/sprd_wlan_combo/Kconfig"
 source "drivers/unisoc_platform/sprd_bt/Kconfig"
 source "drivers/unisoc_platform/iommu/Kconfig"
+source "drivers/unisoc_platform/sprd_disp/Kconfig"
 
 endmenu
