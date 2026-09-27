@@ -4,6 +4,7 @@
  *
  * Copyright (c) 2020 Spreadtrum Communications Inc.
  */
+#include <linux/of.h>
 #include <linux/cpu_pm.h>
 #include <linux/cdev.h>
 #include <linux/mfd/syscon.h>

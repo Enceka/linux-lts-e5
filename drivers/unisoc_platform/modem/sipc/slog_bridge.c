@@ -691,7 +691,7 @@ static int slog_bridge_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int  slog_bridge_remove(struct platform_device *pdev)
+static void slog_bridge_remove(struct platform_device *pdev)
 {
 	struct slog_bridge *sb = platform_get_drvdata(pdev);
 
@@ -707,8 +707,6 @@ static int  slog_bridge_remove(struct platform_device *pdev)
 		devm_kfree(&pdev->dev, sb);
 		platform_set_drvdata(pdev, NULL);
 	}
-
-	return 0;
 }
 
 static const struct of_device_id slog_bridge_match_table[] = {

@@ -1172,14 +1172,14 @@ static inline unsigned long _unalign_copy_to_user(void __user *to,
 {
 	if (((unsigned long)from & 7) && (n < 16)) {
 		while (n) {
-			if (_copy_to_user(to++, from++, 1))
+			if (copy_to_user(to++, from++, 1))
 				break;
 			n--;
 		}
 		return n;
 	}
 
-	return _copy_to_user(to, from, n);
+	return copy_to_user(to, from, n);
 }
 
 static inline unsigned long _unalign_copy_from_user(void *to,
@@ -1190,18 +1190,18 @@ static inline unsigned long _unalign_copy_from_user(void *to,
 
 	c1 = !((unsigned long)to & 0x7) && !(n < 16);
 	if (c1)
-		return _copy_from_user(to, from, n);
+		return copy_from_user(to, from, n);
 
 	c2 = !((unsigned long)to & 0x7) && !((unsigned long)from & 0x7);
 	if (c2)
-		return _copy_from_user(to, from, n);
+		return copy_from_user(to, from, n);
 
 	c3 = !(((unsigned long)to ^ (unsigned long)from) & 0x7) && (n > 15);
 	if (c3)
-		return _copy_from_user(to, from, n);
+		return copy_from_user(to, from, n);
 
 	while (n) {
-		if (_copy_from_user(to++, from++, 1))
+		if (copy_from_user(to++, from++, 1))
 			break;
 		n--;
 	}
@@ -1230,14 +1230,14 @@ static inline unsigned long _unalign_copy_to_user(void __user *to,
 						    const void *from,
 						    unsigned long n)
 {
-	return _copy_to_user(to, from, n);
+	return copy_to_user(to, from, n);
 }
 
 static inline unsigned long _unalign_copy_from_user(void *to,
 						    const void __user *from,
 						    unsigned long n)
 {
-	return _copy_from_user(to, from, n);
+	return copy_from_user(to, from, n);
 }
 #endif
 

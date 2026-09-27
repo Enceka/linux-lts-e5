@@ -541,7 +541,7 @@ static ssize_t modem_read(struct file *filp,
 		if (copy_size > ALIGN_NUM) {
 			copy_size &= ALIGN_MASK;
 		}
-		if (_copy_to_user(buf, vmem, copy_size)) {
+		if (copy_to_user(buf, vmem, copy_size)) {
 			dev_err(modem->p_dev,
 				"read, copy data from user err!\n");
 			modem_memory_unmap(modem->modem_type, vmem);
@@ -624,7 +624,7 @@ static ssize_t modem_write(struct file *filp,
 			copy_size &= ALIGN_MASK;
 		}
 
-		if (_copy_from_user(vmem, buf, copy_size)) {
+		if (copy_from_user(vmem, buf, copy_size)) {
 			dev_err(modem->p_dev,
 				"write, copy data from user err!\n");
 			modem_memory_unmap(modem->modem_type, vmem);
@@ -1395,7 +1395,7 @@ static int modem_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int  modem_remove(struct platform_device *pdev)
+static void modem_remove(struct platform_device *pdev)
 {
 	struct modem_device *modem = platform_get_drvdata(pdev);
 
@@ -1412,8 +1412,6 @@ static int  modem_remove(struct platform_device *pdev)
 #endif
 		platform_set_drvdata(pdev, NULL);
 	}
-
-	return 0;
 }
 
 static struct platform_driver modem_driver = {

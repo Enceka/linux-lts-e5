@@ -302,7 +302,7 @@ static int spipe_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int  spipe_remove(struct platform_device *pdev)
+static void spipe_remove(struct platform_device *pdev)
 {
 	struct spipe_device *spipe = platform_get_drvdata(pdev);
 	int i;
@@ -324,8 +324,6 @@ static int  spipe_remove(struct platform_device *pdev)
 
 		platform_set_drvdata(pdev, NULL);
 	}
-
-	return 0;
 }
 
 static const struct of_device_id spipe_match_table[] = {

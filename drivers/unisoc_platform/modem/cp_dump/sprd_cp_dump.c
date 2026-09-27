@@ -11,6 +11,7 @@
  * Spreadtrum SoCs.
  */
 
+#include <linux/of.h>
 #include <linux/cdev.h>
 #include <linux/compat.h>
 #include <linux/miscdevice.h>
@@ -415,7 +416,7 @@ static int cp_dump_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int  cp_dump_remove(struct platform_device *pdev)
+static void cp_dump_remove(struct platform_device *pdev)
 {
 	if (cp_dump) {
 		wakeup_source_unregister(cp_dump->rd_ws);
@@ -424,8 +425,6 @@ static int  cp_dump_remove(struct platform_device *pdev)
 		mutex_destroy(&cp_dump->wt_mutex);
 		misc_deregister(&cp_dump->mdev);
 	}
-
-	return 0;
 }
 
 static struct of_device_id cp_dump_match_table[] = {

@@ -289,8 +289,9 @@ static void sipc_wwan_watch(struct work_struct *work)
 	struct wwan_port *port;
 
 	if (up && !sw->port) {
+		/* no caps: the AT channel has no frame size to announce (6.x added the argument) */
 		port = wwan_create_port(&sw->pdev->dev, WWAN_PORT_AT,
-					&sipc_wwan_ops, sw);
+					&sipc_wwan_ops, NULL, sw);
 		if (IS_ERR(port)) {
 			pr_err_ratelimited("sipc_wwan: no AT port: %ld\n",
 					   PTR_ERR(port));

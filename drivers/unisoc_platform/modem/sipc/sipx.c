@@ -1898,8 +1898,7 @@ static int create_sipx_channel_ctrl(struct sipx_mgr *sipx, u8 channel,
 	}
 
 	/* trigger cp interrupt timer init */
-	hrtimer_init(&sipx_chan->ul_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	sipx_chan->ul_timer.function = sipx_ul_trigger_timer_handler;
+	hrtimer_setup(&sipx_chan->ul_timer, sipx_ul_trigger_timer_handler, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	spin_lock_init(&sipx_chan->lock);
 	sipx_chan->ul_timer_active = 0;
 	sipx_chan->ul_timer_val = ns_to_ktime(TIME_TRIGGER_CP_NS);

@@ -13,6 +13,8 @@
  */
 
 #include "sprd_iq.h"
+#include <linux/of.h>
+#include <linux/soc/sprd/unisoc_compat.h>
 
 static struct sprd_iq_mgr iq;
 
