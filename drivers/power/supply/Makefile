@@ -76,7 +76,12 @@ obj-$(CONFIG_CHARGER_TWL6030)	+= twl6030_charger.o
 obj-$(CONFIG_CHARGER_LP8727)	+= lp8727_charger.o
 obj-$(CONFIG_CHARGER_LP8788)	+= lp8788-charger.o
 obj-$(CONFIG_CHARGER_GPIO)	+= gpio-charger.o
-obj-$(CONFIG_CHARGER_MANAGER)	+= charger-manager.o
+# the charger manager of Unisoc's 5.15 tree (in the place of mainline's), with its votes and detection
+obj-$(CONFIG_CHARGER_MANAGER)	+= sprd-charger-manager.o
+sprd-charger-manager-objs := charger-manager.o sprd_vote.o sprd_vchg_detect.o sprd_fchg_extcon.o
+obj-$(CONFIG_FUEL_GAUGE_UMP96XX)	+= ump96xx_fuel_gauge.o sprd_battery_info.o
+ump96xx_fuel_gauge-objs := sprd_fuel_gauge_core.o sprd_ump96xx_fuel_gauge.o
+obj-$(CONFIG_CHARGER_AW32257)	+= aw32257_charger.o
 obj-$(CONFIG_CHARGER_LT3651)	+= lt3651-charger.o
 obj-$(CONFIG_CHARGER_LTC4162L)	+= ltc4162-l-charger.o
 obj-$(CONFIG_CHARGER_MAX14577)	+= max14577_charger.o
