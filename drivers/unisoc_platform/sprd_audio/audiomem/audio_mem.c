@@ -13,6 +13,7 @@
 #include <asm/cacheflush.h>
 #endif
 #include <linux/vmalloc.h>
+#include <linux/io.h>
 
 #include "audio_mem.h"
 
@@ -46,6 +47,7 @@ struct smem_map {
 	const void *mem;
 	void *mem_real;
 	unsigned int count;
+	bool ioremapped;	/* no pages behind it: ioremap(), not vmap() */
 };
 
 struct smem_map_list {
@@ -408,22 +410,44 @@ void *audio_mem_vmap(phys_addr_t start, size_t size, int writecombine)
 	else
 		prot = pgprot_writecombine(PAGE_KERNEL);
 
-	pages = kmalloc_array(page_count, sizeof(struct page *), GFP_KERNEL);
-	if (!pages) {
+	/*
+	 * The audio DSP's memory is DDR reserved no-map (the DSP image, the
+	 * IPC buffers) or its IRAM, on-chip SRAM: neither has pages, and
+	 * vmap() refuses pfns without a valid page since 5.19 -- it returned
+	 * NULL, and NULL plus the page offset went back as the mapping (the
+	 * AON IRAM's 0x400: memset_io() on it at the DSP's start).  Such memory
+	 * is ioremapped with the same memory type.
+	 */
+	if (!pfn_valid(PHYS_PFN(page_start)) ||
+	    !pfn_valid(PHYS_PFN(page_start + (phys_addr_t)(page_count - 1) * PAGE_SIZE))) {
+		size_t len = (size_t)page_count * PAGE_SIZE;
+
+		vaddr = (__force void *)(writecombine ? ioremap_wc(page_start, len) :
+					 ioremap(page_start, len));
+		map->ioremapped = true;
+	} else {
+		pages = kmalloc_array(page_count, sizeof(struct page *), GFP_KERNEL);
+		if (!pages) {
+			kfree(map);
+			return NULL;
+		}
+
+		for (i = 0; i < page_count; i++) {
+			addr = page_start + i * PAGE_SIZE;
+			pages[i] = pfn_to_page(addr >> PAGE_SHIFT);
+		}
+#ifdef CONFIG_X86
+		audio_mem_set_page_type(pages[0], page_count, writecombine ?
+					AUDIO_PG_WC : AUDIO_PG_UC);
+#endif
+		vaddr = vmap(pages, page_count, VM_MAP, prot);
+		kfree(pages);
+	}
+	if (!vaddr) {
+		pr_err("%s: cannot map %pa (%u pages)\n", __func__, &page_start, page_count);
 		kfree(map);
 		return NULL;
 	}
-
-	for (i = 0; i < page_count; i++) {
-		addr = page_start + i * PAGE_SIZE;
-		pages[i] = pfn_to_page(addr >> PAGE_SHIFT);
-	}
-#ifdef CONFIG_X86
-	audio_mem_set_page_type(pages[0], page_count, writecombine ?
-				AUDIO_PG_WC : AUDIO_PG_UC);
-#endif
-	vaddr = vmap(pages, page_count, VM_MAP, prot);
-	kfree(pages);
 
 	map->count = page_count;
 	map->mem = vaddr;
@@ -452,7 +476,10 @@ void audio_mem_unmap(const void *mem)
 			if (map->mem_real == mem) {
 				list_del(&map->map_list);
 				spin_unlock_irqrestore(&smem->lock, flags);
-				vunmap(map->mem);
+				if (map->ioremapped)
+					iounmap((__force void __iomem *)map->mem);
+				else
+					vunmap(map->mem);
 				kfree(map);
 				return;
 			}
