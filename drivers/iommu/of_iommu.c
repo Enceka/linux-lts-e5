@@ -19,6 +19,23 @@
 
 #include "iommu-priv.h"
 
+/*
+ * Unisoc's IOMMUs of their 5.15 tree (drivers/unisoc_platform/iommu) are driven through a private API
+ * by their own masters and never register with the IOMMU core, so waiting for one only delays the master
+ * until the deferred probe timeout (5.15's timeout was 0, so it never waited).  Mainline's sprd-iommu
+ * ("sprd,iommu-v1") is not one of them.
+ */
+static bool of_iommu_is_unisoc_private(struct device_node *np)
+{
+	struct property *prop;
+	const char *compat;
+
+	of_property_for_each_string(np, "compatible", prop, compat)
+		if (strstarts(compat, "unisoc,iommu") || strstarts(compat, "sprd,iommuva"))
+			return true;
+	return false;
+}
+
 static int of_iommu_xlate(struct device *dev,
 			  struct of_phandle_args *iommu_spec)
 {
@@ -26,6 +43,10 @@ static int of_iommu_xlate(struct device *dev,
 	int ret;
 
 	if (!of_device_is_available(iommu_spec->np))
+		return -ENODEV;
+
+	if (!iommu_ops_from_fwnode(&iommu_spec->np->fwnode) &&
+	    of_iommu_is_unisoc_private(iommu_spec->np))
 		return -ENODEV;
 
 	ret = iommu_fwspec_init(dev, of_fwnode_handle(iommu_spec->np));
