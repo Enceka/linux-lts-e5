@@ -24,6 +24,14 @@
  * character devices (unisoc-cpd) are mutually exclusive: load it only when
  * ModemManager is to own the modem.
  *
+ * The other card's rings count as well.  The CP runs one AT interpreter per
+ * SIM card on the same sbuf: rings 0-2 for the first card (URCs on 0), 3-5
+ * for the second (URCs on 3), as the vendor RIL opens them.  Whichever card
+ * the port is on, the other one's URC ring is read and dropped (drain_rings):
+ * with the port on the second card, ring 0 filled within a minute and the
+ * CP's AT server stopped answering on every ring, without an assert, until a
+ * reboot.
+ *
  * The CP asserts ("Error 0xb, The queue was full") when AT commands arrive
  * back to back for minutes; its RIL and unisoc-cpd space them.  tx_gap_ms
  * enforces a minimum gap between writes, so no client has to know.
@@ -73,6 +81,12 @@ static int urc_ring;
 module_param(urc_ring, int, 0444);
 MODULE_PARM_DESC(urc_ring, "receive-only sbuf ring with the URCs, merged into the port (-1: none)");
 
+#define SIPC_WWAN_DRAIN_MAX	4
+static int drain_rings[SIPC_WWAN_DRAIN_MAX];
+static int n_drain_rings = -1;
+module_param_array(drain_rings, int, &n_drain_rings, 0444);
+MODULE_PARM_DESC(drain_rings, "receive-only rings to read and drop (default: the URC ring, 0 or 3, the port does not use)");
+
 static unsigned int tx_gap_ms = 300;
 module_param(tx_gap_ms, uint, 0644);
 MODULE_PARM_DESC(tx_gap_ms, "minimum gap between two writes, in ms");
@@ -96,7 +110,16 @@ struct sipc_wwan {
 	char urc_line[SIPC_WWAN_URC_LINE];
 	unsigned int urc_len;
 	struct sk_buff_head urc_held;
+	unsigned long drained;
 };
+
+struct sipc_wwan_drain {
+	struct sipc_wwan *sw;
+	int ring;
+};
+
+static struct sipc_wwan_drain drains[SIPC_WWAN_DRAIN_MAX];
+static int n_drains;
 
 static struct sipc_wwan sipc_wwan;
 
@@ -182,6 +205,20 @@ static void sipc_wwan_urc_notify(int event, void *data)
 				sipc_wwan_urc_line(sw);
 		}
 	}
+}
+
+static void sipc_wwan_drain_notify(int event, void *data)
+{
+	struct sipc_wwan_drain *d = data;
+	char buf[256];
+	int n;
+
+	if (event != SBUF_NOTIFY_READ)
+		return;
+
+	while ((n = sbuf_read(d->sw->dst, d->sw->channel, d->ring, buf,
+			      sizeof(buf), 0)) > 0)
+		d->sw->drained += n;
 }
 
 static int sipc_wwan_start(struct wwan_port *port)
@@ -327,7 +364,7 @@ static int __init sipc_wwan_init(void)
 	struct sipc_wwan *sw = &sipc_wwan;
 	struct device_node *np, *parent;
 	u32 dst, channel, ringnr = 0;
-	int ret;
+	int ret, i = 0;
 
 	np = sipc_wwan_find_node();
 	if (!np) {
@@ -355,6 +392,25 @@ static int __init sipc_wwan_init(void)
 		ret = -EINVAL;
 		goto err;
 	}
+	if (n_drain_rings < 0) {
+		/* the two cards' URC rings, less the one merged into the port */
+		n_drain_rings = 0;
+		if (urc_ring != 0 && cmd_ring != 0)
+			drain_rings[n_drain_rings++] = 0;
+		if (urc_ring != 3 && cmd_ring != 3)
+			drain_rings[n_drain_rings++] = 3;
+	}
+	for (n_drains = 0; n_drains < n_drain_rings; n_drains++) {
+		int r = drain_rings[n_drains];
+
+		if (r < 0 || r >= ringnr || r == cmd_ring || r == urc_ring) {
+			pr_err("sipc_wwan: bad drain ring %d\n", r);
+			ret = -EINVAL;
+			goto err;
+		}
+		drains[n_drains].sw = sw;
+		drains[n_drains].ring = r;
+	}
 
 	sw->dst = dst;
 	sw->channel = channel;
@@ -368,12 +424,26 @@ static int __init sipc_wwan_init(void)
 	if (!ret && urc_ring >= 0)
 		ret = sbuf_register_notifier(dst, channel, urc_ring,
 					     sipc_wwan_urc_notify, sw);
+	for (i = 0; !ret && i < n_drains; i++) {
+		ret = sbuf_register_notifier(dst, channel, drains[i].ring,
+					     sipc_wwan_drain_notify, &drains[i]);
+		if (ret) {
+			pr_err("sipc_wwan: cannot drain ring %d: %d\n",
+			       drains[i].ring, ret);
+			break;
+		}
+	}
 	if (ret) {
+		/* drains[0..i-1] are registered */
+		while (--i >= 0)
+			sbuf_unregister_notifier(dst, channel, drains[i].ring);
+		if (urc_ring >= 0)
+			sbuf_unregister_notifier(dst, channel, urc_ring);
 		sbuf_unregister_notifier(dst, channel, cmd_ring);
 		goto err;
 	}
-	pr_info("sipc_wwan: AT channel %s (dst %u, channel %u): ring %d, URCs from ring %d\n",
-		node_label, dst, channel, cmd_ring, urc_ring);
+	pr_info("sipc_wwan: AT channel %s (dst %u, channel %u): ring %d, URCs from ring %d, %d ring(s) drained\n",
+		node_label, dst, channel, cmd_ring, urc_ring, n_drains);
 	schedule_delayed_work(&sw->watch, 0);
 	return 0;
 
@@ -386,8 +456,11 @@ err:
 static void __exit sipc_wwan_exit(void)
 {
 	struct sipc_wwan *sw = &sipc_wwan;
+	int i;
 
 	/* notifiers first: a READY event would queue the watch again */
+	for (i = 0; i < n_drains; i++)
+		sbuf_unregister_notifier(sw->dst, sw->channel, drains[i].ring);
 	if (urc_ring >= 0)
 		sbuf_unregister_notifier(sw->dst, sw->channel, urc_ring);
 	sbuf_unregister_notifier(sw->dst, sw->channel, cmd_ring);
@@ -395,8 +468,8 @@ static void __exit sipc_wwan_exit(void)
 	cancel_delayed_work_sync(&sw->watch);
 	if (sw->port)
 		sipc_wwan_remove_port(sw);
-	pr_info("sipc_wwan: %lu bytes dropped while the port was closed\n",
-		sw->dropped);
+	pr_info("sipc_wwan: %lu bytes dropped while the port was closed, %lu drained\n",
+		sw->dropped, sw->drained);
 	put_device(&sipc_wwan.pdev->dev);
 }
 
