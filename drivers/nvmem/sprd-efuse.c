@@ -75,6 +75,13 @@ static const struct sprd_efuse_variant_data ums312_data = {
 	.blk_double = false,
 };
 
+/* UMS9620/UMS9621 (QogirN6Pro/N6Lite): the values of the Unisoc 5.15 tree */
+static const struct sprd_efuse_variant_data qogirn6lite_data = {
+	.blk_nums = 51,
+	.blk_offset = 53,
+	.blk_double = true,
+};
+
 /*
  * On Spreadtrum platform, we have multi-subsystems will access the unique
  * efuse controller, so we need one hardware spinlock to synchronize between
@@ -424,6 +431,7 @@ static int sprd_efuse_probe(struct platform_device *pdev)
 
 static const struct of_device_id sprd_efuse_of_match[] = {
 	{ .compatible = "sprd,ums312-efuse", .data = &ums312_data },
+	{ .compatible = "sprd,qogirn6lite-efuse", .data = &qogirn6lite_data },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, sprd_efuse_of_match);
