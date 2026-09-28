@@ -32,6 +32,15 @@
  * CP's AT server stopped answering on every ring, without an assert, until a
  * reboot.
  *
+ * Which card a command is for is not the ring's doing, though: on Linux the
+ * CP answered ring 4 for the first card.  Commands reach a card through the
+ * vendor's AT+SPACTCARD=<card>, which UFI-TOOLS puts in front of each one
+ * ("AT+SPACTCARD=1;+CIMI"); a bare AT+SPACTCARD sticks, but only until the
+ * next power change (+CFUN) put the CP back on the first card.  So with
+ * card=1 this driver prefixes every extended command itself, and takes the
+ * second card's rings (4, URCs on 3) unless told otherwise.  The URCs do go
+ * by card: the second card's stack reports on ring 3.
+ *
  * The CP asserts ("Error 0xb, The queue was full") when AT commands arrive
  * back to back for minutes; its RIL and unisoc-cpd space them.  tx_gap_ms
  * enforces a minimum gap between writes, so no client has to know.
@@ -62,6 +71,7 @@
 #include <linux/sipc.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/workqueue.h>
 #include <linux/wwan.h>
 
@@ -73,13 +83,17 @@ static char *node_label = "stty_nr";
 module_param(node_label, charp, 0444);
 MODULE_PARM_DESC(node_label, "label of the sprd,spipe node that carries AT");
 
-static int cmd_ring = 1;
-module_param(cmd_ring, int, 0444);
-MODULE_PARM_DESC(cmd_ring, "sbuf ring of the AT command channel");
+static int card = -1;
+module_param(card, int, 0444);
+MODULE_PARM_DESC(card, "SIM card the port is for: every AT+ command gets +SPACTCARD=<card>; (-1: none, the CP's default, the first card)");
 
-static int urc_ring;
+static int cmd_ring = -1;
+module_param(cmd_ring, int, 0444);
+MODULE_PARM_DESC(cmd_ring, "sbuf ring of the AT command channel (default: 1, or 4 for card 1)");
+
+static int urc_ring = -2;
 module_param(urc_ring, int, 0444);
-MODULE_PARM_DESC(urc_ring, "receive-only sbuf ring with the URCs, merged into the port (-1: none)");
+MODULE_PARM_DESC(urc_ring, "receive-only sbuf ring with the URCs, merged into the port (-1: none; default: 0, or 3 for card 1)");
 
 #define SIPC_WWAN_DRAIN_MAX	4
 static int drain_rings[SIPC_WWAN_DRAIN_MAX];
@@ -287,9 +301,35 @@ static void sipc_wwan_trim_lf(struct sk_buff *skb)
 		skb_trim(skb, skb->len - 1);
 }
 
+/*
+ * "AT+X..." -> "AT+SPACTCARD=<card>;+X...": an extended command for the
+ * card.  Basic commands (ATE0, ATI, ATD...) and payloads are left alone, and
+ * so is a command that names its card already.
+ */
+static struct sk_buff *sipc_wwan_for_card(struct sk_buff *skb)
+{
+	char prefix[24];
+	struct sk_buff *nskb;
+	int n;
+
+	if (card < 0 || skb->len < 3 || strncasecmp(skb->data, "AT+", 3) ||
+	    (skb->len >= 12 && !strncasecmp(skb->data, "AT+SPACTCARD", 12)))
+		return skb;
+	n = snprintf(prefix, sizeof(prefix), "AT+SPACTCARD=%d;", card);
+	nskb = alloc_skb(n + skb->len - 2, GFP_KERNEL);
+	if (!nskb)
+		return skb;
+	skb_put_data(nskb, prefix, n);
+	/* the command from its '+' on */
+	skb_put_data(nskb, skb->data + 2, skb->len - 2);
+	consume_skb(skb);
+	return nskb;
+}
+
 static int sipc_wwan_tx(struct wwan_port *port, struct sk_buff *skb)
 {
 	sipc_wwan_trim_lf(skb);
+	skb = sipc_wwan_for_card(skb);
 	/* AT commands are short; a full 2 KiB ring drains within a second */
 	return sipc_wwan_write(wwan_port_get_drvdata(port), skb, HZ);
 }
@@ -297,6 +337,7 @@ static int sipc_wwan_tx(struct wwan_port *port, struct sk_buff *skb)
 static int sipc_wwan_tx_blocking(struct wwan_port *port, struct sk_buff *skb)
 {
 	sipc_wwan_trim_lf(skb);
+	skb = sipc_wwan_for_card(skb);
 	return sipc_wwan_write(wwan_port_get_drvdata(port), skb, -1);
 }
 
@@ -385,6 +426,15 @@ static int __init sipc_wwan_init(void)
 		ret = ret ?: -ENODEV;
 		goto err;
 	}
+	if (card > 1) {
+		pr_err("sipc_wwan: card %d: the CP has cards 0 and 1\n", card);
+		ret = -EINVAL;
+		goto err;
+	}
+	if (cmd_ring == -1)
+		cmd_ring = card == 1 ? 4 : 1;
+	if (urc_ring == -2)
+		urc_ring = card == 1 ? 3 : 0;
 	if (cmd_ring < 0 || cmd_ring >= ringnr || urc_ring >= (int)ringnr ||
 	    urc_ring == cmd_ring) {
 		pr_err("sipc_wwan: bad rings %d/%d (%u rings)\n", cmd_ring,
@@ -442,8 +492,8 @@ static int __init sipc_wwan_init(void)
 		sbuf_unregister_notifier(dst, channel, cmd_ring);
 		goto err;
 	}
-	pr_info("sipc_wwan: AT channel %s (dst %u, channel %u): ring %d, URCs from ring %d, %d ring(s) drained\n",
-		node_label, dst, channel, cmd_ring, urc_ring, n_drains);
+	pr_info("sipc_wwan: AT channel %s (dst %u, channel %u): ring %d, URCs from ring %d, %d ring(s) drained, card %d\n",
+		node_label, dst, channel, cmd_ring, urc_ring, n_drains, card);
 	schedule_delayed_work(&sw->watch, 0);
 	return 0;
 
