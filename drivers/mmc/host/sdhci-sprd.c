@@ -780,6 +780,16 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	/*
+	 * No reliable writes: the vendor kernel strips REQ_FUA from every eMMC
+	 * request, so the eMMCs these SoCs ship with are only known to work
+	 * without them.  On the UMS9621's (manfid 0x37), F2FS -- whose
+	 * checkpoints are FUA writes -- was found twice after a reset with other
+	 * metadata blocks' old contents in its NAT blocks.  FUA then becomes a
+	 * write and a cache flush.
+	 */
+	host->mmc->caps2 |= MMC_CAP2_NO_REL_WR;
+
 	if (!mmc_card_is_removable(host->mmc))
 		host->mmc_host_ops.request_atomic = sdhci_sprd_request_atomic;
 	else
