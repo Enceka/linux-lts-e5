@@ -36,6 +36,7 @@
 #include <linux/lockdep.h>
 #include <linux/user_namespace.h>
 #include <linux/fs_context.h>
+#include <linux/reboot.h>
 #include <uapi/linux/mount.h>
 #include "internal.h"
 
@@ -1127,6 +1128,55 @@ static void do_emergency_remount(struct work_struct *work)
 	kfree(work);
 	printk("Emergency Remount complete\n");
 }
+
+#ifdef CONFIG_REBOOT_REMOUNT_RO
+static void reboot_remount_ro_callback(struct super_block *sb, void *unused)
+{
+	struct fs_context *fc;
+	int err;
+
+	if (!sb->s_bdev || sb_rdonly(sb))
+		return;
+	sync_filesystem(sb);
+	fc = fs_context_for_reconfigure(sb->s_root, SB_RDONLY | SB_FORCE,
+					SB_RDONLY);
+	if (IS_ERR(fc)) {
+		err = PTR_ERR(fc);
+	} else {
+		err = parse_monolithic_mount_data(fc, NULL);
+		if (!err)
+			err = reconfigure_super(fc);
+		put_fs_context(fc);
+	}
+	if (err)
+		pr_warn("reboot: %s (%s) not remounted read-only: %d\n",
+			sb->s_id, sb->s_type->name, err);
+	else
+		pr_info("reboot: %s (%s) remounted read-only\n",
+			sb->s_id, sb->s_type->name);
+}
+
+static int reboot_remount_ro(struct notifier_block *nb, unsigned long action,
+			     void *data)
+{
+	/* the last mounted first: a loop image's before its backing file's */
+	__iterate_supers(reboot_remount_ro_callback, NULL,
+			 SUPER_ITER_EXCL | SUPER_ITER_REVERSE);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block reboot_remount_ro_nb = {
+	.notifier_call = reboot_remount_ro,
+	/* before the other reboot notifiers, while every device still works */
+	.priority = INT_MAX,
+};
+
+static int __init reboot_remount_ro_init(void)
+{
+	return register_reboot_notifier(&reboot_remount_ro_nb);
+}
+fs_initcall(reboot_remount_ro_init);
+#endif
 
 void emergency_remount(void)
 {

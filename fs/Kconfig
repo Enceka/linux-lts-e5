@@ -119,6 +119,19 @@ config FILE_LOCKING
           for filesystems like NFS and for the flock() system
           call. Disabling this option saves about 11k.
 
+config REBOOT_REMOUNT_RO
+	bool "Remount filesystems read-only on restart and power off"
+	help
+	  On a restart, halt or power off, before the devices shut down: sync
+	  every filesystem on a block device and remount it read-only, the
+	  last mounted first -- so that one in a loop file is clean before the
+	  filesystem that holds the file, which is left with a clean unmount
+	  too.  For systems whose root cannot be unmounted before the reset
+	  (a loop image on a data partition), where the filesystems were left
+	  mounted read-write and dirty.
+
+	  Not on an emergency restart (panic, SysRq-B).
+
 source "fs/crypto/Kconfig"
 
 source "fs/verity/Kconfig"
