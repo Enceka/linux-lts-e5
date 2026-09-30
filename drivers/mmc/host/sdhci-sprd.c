@@ -9,15 +9,19 @@
 #include <linux/dma-mapping.h>
 #include <linux/highmem.h>
 #include <linux/iopoll.h>
+#include <linux/mfd/syscon.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
+#include <linux/mmc/slot-gpio.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
+#include <linux/soc/sprd/unisoc_gpio_compat.h>
 
 #include "sdhci-pltfm.h"
 #include "mmc_hsq.h"
@@ -80,6 +84,12 @@
 #define SDHCI_SPRD_POSRD_DLY_MASK	GENMASK(23, 16)
 #define SDHCI_SPRD_CPST_EN		GENMASK(27, 24)
 
+struct register_hotplug {
+	struct regmap *regmap;
+	u32 reg;
+	u32 mask;
+};
+
 struct sdhci_sprd_host {
 	u32 version;
 	struct clk *clk_sdio;
@@ -91,6 +101,13 @@ struct sdhci_sprd_host {
 	u32 base_rate;
 	int flags; /* backup of host attribute */
 	u32 phy_delay[MMC_TIMING_MMC_HS400 + 2];
+	struct register_hotplug reg_detect_polar;
+	struct register_hotplug reg_protect_enable;
+	struct register_hotplug reg_debounce_en;
+	struct register_hotplug reg_debounce_cn;
+	struct register_hotplug reg_rmldo_en;
+	bool fast_hotplug;
+	bool cd_active_high;
 };
 
 enum sdhci_sprd_tuning_type {
@@ -432,22 +449,129 @@ static void sdhci_sprd_request_done(struct sdhci_host *host,
 	mmc_request_done(host->mmc, mrq);
 }
 
+/*
+ * convert mask to offset in 32bits,
+ * like convert 0x1E to 1, 0x00FF0000 to 16
+ */
+static int mask_to_offset(u32 mask)
+{
+	int offset;
+
+	for (offset = 0; offset < 32; offset++)
+		if ((mask >> offset) & BIT(0))
+			return offset;
+
+	return 0;
+}
+
+static void sdhci_sprd_get_fast_hotplug_reg(struct device_node *np,
+	struct register_hotplug *reg, const char *name)
+{
+	struct regmap *regmap;
+	u32 syscon_args[2];
+
+	regmap = syscon_regmap_lookup_by_phandle_args(np, name, 2, syscon_args);
+	if (IS_ERR(regmap)) {
+		reg->regmap = NULL;
+		reg->reg = 0;
+		reg->mask = 0;
+		return;
+	}
+
+	reg->regmap = regmap;
+	reg->reg = syscon_args[0];
+	reg->mask = syscon_args[1];
+}
+
+static void sdhci_sprd_get_fast_hotplug_info(struct device_node *np,
+	struct sdhci_sprd_host *sprd_host)
+{
+	sdhci_sprd_get_fast_hotplug_reg(np, &sprd_host->reg_detect_polar,
+		"sd-detect-pol-syscon");
+	sdhci_sprd_get_fast_hotplug_reg(np, &sprd_host->reg_protect_enable,
+		"sd-hotplug-protect-en-syscon");
+	sdhci_sprd_get_fast_hotplug_reg(np, &sprd_host->reg_debounce_en,
+		"sd-hotplug-debounce-en-syscon");
+	sdhci_sprd_get_fast_hotplug_reg(np, &sprd_host->reg_debounce_cn,
+		"sd-hotplug-debounce-cn-syscon");
+	sdhci_sprd_get_fast_hotplug_reg(np, &sprd_host->reg_rmldo_en,
+		"sd-hotplug-rmldo-en-syscon");
+}
+
+/*
+ * The removable slot's card detect has an AON-side fast path -- detect
+ * polarity, glitch protection, a debounce counter and the card's RMLDO.
+ * Unisoc's driver programs them when the slot is powered with a card in it;
+ * the RMLDO is the card's supply switch, so a slot without it does not power
+ * up.  The vendor device tree gives all five to the SD controller (sdio0)
+ * alone.
+ */
+static void sdhci_sprd_fast_hotplug_disable(struct sdhci_sprd_host *sprd_host)
+{
+	regmap_update_bits(sprd_host->reg_protect_enable.regmap,
+		sprd_host->reg_protect_enable.reg,
+		sprd_host->reg_protect_enable.mask, 0);
+}
+
+static void sdhci_sprd_fast_hotplug_enable(struct sdhci_sprd_host *sprd_host)
+{
+	int debounce_counter = 3;
+	u32 reg_value = 0;
+
+	if (sprd_host->reg_rmldo_en.regmap) {
+		/* this register does not support bit updates */
+		if (regmap_read(sprd_host->reg_rmldo_en.regmap,
+				sprd_host->reg_rmldo_en.reg, &reg_value))
+			return;
+		reg_value |= sprd_host->reg_rmldo_en.mask;
+		if (regmap_write(sprd_host->reg_rmldo_en.regmap,
+				sprd_host->reg_rmldo_en.reg, reg_value))
+			return;
+	}
+
+	regmap_update_bits(sprd_host->reg_protect_enable.regmap,
+		sprd_host->reg_protect_enable.reg,
+		sprd_host->reg_protect_enable.mask,
+		sprd_host->reg_protect_enable.mask);
+	regmap_update_bits(sprd_host->reg_debounce_en.regmap,
+		sprd_host->reg_debounce_en.reg,
+		sprd_host->reg_debounce_en.mask,
+		sprd_host->reg_debounce_en.mask);
+	regmap_update_bits(sprd_host->reg_debounce_cn.regmap,
+		sprd_host->reg_debounce_cn.reg,
+		sprd_host->reg_debounce_cn.mask,
+		debounce_counter << mask_to_offset(sprd_host->reg_debounce_cn.mask));
+	regmap_update_bits(sprd_host->reg_detect_polar.regmap,
+		sprd_host->reg_detect_polar.reg,
+		sprd_host->reg_detect_polar.mask,
+		sprd_host->cd_active_high ? sprd_host->reg_detect_polar.mask : 0);
+}
+
 static void sdhci_sprd_set_power(struct sdhci_host *host, unsigned char mode,
 				 unsigned short vdd)
 {
+	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
 	struct mmc_host *mmc = host->mmc;
+	bool card_present = mmc_gpio_get_cd(mmc) > 0;
 
 	switch (mode) {
 	case MMC_POWER_OFF:
+		if (sprd_host->fast_hotplug && card_present)
+			sdhci_sprd_fast_hotplug_disable(sprd_host);
+
 		mmc_regulator_set_ocr(host->mmc, mmc->supply.vmmc, 0);
 
 		mmc_regulator_disable_vqmmc(mmc);
 		break;
 	case MMC_POWER_ON:
 		mmc_regulator_enable_vqmmc(mmc);
+		if (sprd_host->fast_hotplug && card_present)
+			sdhci_sprd_fast_hotplug_enable(sprd_host);
 		break;
 	case MMC_POWER_UP:
 		mmc_regulator_set_ocr(host->mmc, mmc->supply.vmmc, vdd);
+		if (sprd_host->fast_hotplug && card_present)
+			sdhci_sprd_fast_hotplug_enable(sprd_host);
 		break;
 	}
 }
@@ -748,6 +872,8 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 	struct mmc_hsq *hsq;
 	struct clk *clk;
 	u32 ocr_mask = 0;
+	int gpio;
+	enum of_gpio_flags flags = 0;
 	int ret = 0;
 
 	host = sdhci_pltfm_init(pdev, &sdhci_sprd_pdata, sizeof(*sprd_host));
@@ -797,6 +923,23 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
 
 	sprd_host = TO_SPRD_HOST(host);
 	sdhci_sprd_phy_param_parse(sprd_host, pdev->dev.of_node);
+
+	/*
+	 * The slot's fast-hotplug registers only exist for the removable SD
+	 * controller; the vendor DT wires them up together with a card-detect
+	 * GPIO, so parse them only when one is present.
+	 */
+	gpio = of_get_named_gpio_flags(pdev->dev.of_node, "cd-gpios", 0, &flags);
+	if (gpio >= 0) {
+		sdhci_sprd_get_fast_hotplug_info(pdev->dev.of_node, sprd_host);
+		sprd_host->cd_active_high = !(flags & OF_GPIO_ACTIVE_LOW);
+		sprd_host->fast_hotplug =
+			sprd_host->reg_detect_polar.regmap &&
+			sprd_host->reg_protect_enable.regmap &&
+			sprd_host->reg_debounce_en.regmap &&
+			sprd_host->reg_debounce_cn.regmap &&
+			sprd_host->reg_rmldo_en.regmap;
+	}
 
 	sprd_host->pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (!IS_ERR(sprd_host->pinctrl)) {
