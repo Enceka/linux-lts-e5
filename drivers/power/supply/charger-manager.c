@@ -4719,11 +4719,20 @@ static int cm_manager_get_jeita_status(struct charger_manager *cm, int cur_temp)
 
 	recovery_temp_status = i + 1;
 
+	/*
+	 * A fresh start (probe, a plug-in): the zone the temperature is in.  The
+	 * hysteresis below starts from the initial status 4 -- the top zone, which
+	 * stops charging as "overheat" -- and a temperature above the initial
+	 * reference (25.0 C) only ever lets it go up, so a battery warmer than that
+	 * stayed "overheat", Not charging, until it cooled below the temperature
+	 * of that start.
+	 */
 	if (jeita_info->jeita_changed) {
-		jeita_status = 4;
 		jeita_info_init(&desc->jeita_info);
 		dev_info(cm->dev, "%s: jeita_changed= %d\n", __func__,
 			 jeita_info->jeita_changed);
+		jeita_status = temp_status;
+		goto out;
 	}
 
 	/* temperature goes down */
