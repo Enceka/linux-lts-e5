@@ -4145,19 +4145,25 @@ static int sys_iis_sel_put(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 
+	if (!IS_ENABLED(CONFIG_PINCTRL))
+		return -EOPNOTSUPP;
+
 	value = ucontrol->value.enumerated.item[0];
 	sp_asoc_pr_dbg("%s, id=%d,value=%d, texts->texts[] =%s\n",
 		       __func__, id, value, texts->texts[value]);
-	vbc_codec->sys_iis_sel[id] = value;
 	sprintf(buf, "%s_%u", sys_iis_sel_txt[value], id);
 	state = pinctrl_lookup_state(vbc_codec->pctrl, buf);
 	if (IS_ERR(state)) {
-		pr_err("%s line=%d failed\n", __func__, __LINE__);
-		return -EINVAL;
+		pr_err("%s: state %s unavailable: %ld\n", __func__, buf,
+		       PTR_ERR(state));
+		return PTR_ERR(state);
 	}
-	ret =  pinctrl_select_state(vbc_codec->pctrl, state);
-	if (ret != 0)
+	ret = pinctrl_select_state(vbc_codec->pctrl, state);
+	if (ret) {
 		pr_err("%s failed ret = %d\n", __func__, ret);
+		return ret;
+	}
+	vbc_codec->sys_iis_sel[id] = value;
 
 	sp_asoc_pr_dbg("%s,soc iis%d -> %s\n", __func__, id, buf);
 
