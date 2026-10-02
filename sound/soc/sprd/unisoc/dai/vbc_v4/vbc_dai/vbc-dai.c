@@ -6502,6 +6502,7 @@ int sprd_vbc_codec_probe(struct platform_device *pdev)
 	vbc_codec->need_aud_top_clk =
 		of_property_read_bool(np, "sprd,need-aud-top-clk");
 	mutex_init(&vbc_codec->load_mutex);
+	mutex_init(&vbc_codec->capture_scene_mutex);
 	mutex_init(&vbc_codec->agcp_access_mutex);
 	init_usb_play_cap_lock(vbc_codec);
 
@@ -7282,33 +7283,64 @@ static void fill_dsp_startup_data(struct vbc_codec_priv *vbc_codec,
 	para->voice_record_type = vbc_codec->voice_capture_type + 1;
 }
 
+/* The DSP sees backend startup before FE hw_params allocates MCDT. Refuse a
+ * second ADC4 scene here, before sending a conflicting scene to the firmware.
+ */
+static bool dsp_shared_capture(int scene_id, int stream)
+{
+	if (stream != SNDRV_PCM_STREAM_CAPTURE)
+		return false;
+
+	switch (scene_id) {
+	case VBC_DAI_ID_CAPTURE_DSP:
+	case VBC_DAI_ID_FM_CAPTURE_DSP:
+	case VBC_DAI_ID_BT_SCO_CAPTURE_DSP:
+	case AUDCP_DAI_ID_VAD_CAP:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static int dsp_startup(struct vbc_codec_priv *vbc_codec,
 		       int scene_id, int stream)
 {
-	int ret = 0;
 	struct sprd_vbc_stream_startup_shutdown startup_info;
+	bool shared = dsp_shared_capture(scene_id, stream);
+	int ret;
 
 	if (!vbc_codec)
 		return 0;
-	ret = pm_runtime_get_sync(vbc_codec->codec->dev);
-	if (ret < 0) {
-		dev_err(vbc_codec->codec->dev, "%s:agdsp_access_enable:error:%d", __func__, ret);
-		return ret;
+	if (shared) {
+		mutex_lock(&vbc_codec->capture_scene_mutex);
+		if (vbc_codec->capture_scene_users &&
+		    vbc_codec->capture_scene != scene_id) {
+			dev_warn(vbc_codec->codec->dev,
+				 "MCDT ADC4 busy: capture scene %d owns it; requested %d\n",
+				 vbc_codec->capture_scene, scene_id);
+			ret = -EBUSY;
+			goto out;
+		}
 	}
-	memset(&startup_info, 0,
-	       sizeof(struct sprd_vbc_stream_startup_shutdown));
+	ret = pm_runtime_resume_and_get(vbc_codec->codec->dev);
+	if (ret < 0)
+		goto out;
+	memset(&startup_info, 0, sizeof(startup_info));
 	fill_dsp_startup_data(vbc_codec, scene_id, stream, &startup_info);
 	ret = vbc_dsp_func_startup(scene_id, stream, &startup_info);
-	if (ret < 0) {
-		pr_err("vbc_dsp_func_startup return error");
-		pm_runtime_mark_last_busy(vbc_codec->codec->dev);
-		pm_runtime_put_autosuspend(vbc_codec->codec->dev);
-		return ret;
-	}
 	pm_runtime_mark_last_busy(vbc_codec->codec->dev);
 	pm_runtime_put_autosuspend(vbc_codec->codec->dev);
-
-	return 0;
+	if (ret < 0)
+		goto out;
+	if (shared) {
+		vbc_codec->capture_scene = scene_id;
+		vbc_codec->capture_scene_users++;
+	}
+	ret = 0;
+out:
+	if (shared)
+		mutex_unlock(&vbc_codec->capture_scene_mutex);
+	return ret;
 }
 
 static void fill_dsp_shutdown_data(struct vbc_codec_priv *vbc_codec,
@@ -7331,27 +7363,32 @@ static void fill_dsp_shutdown_data(struct vbc_codec_priv *vbc_codec,
 static void dsp_shutdown(struct vbc_codec_priv *vbc_codec,
 			 int scene_id, int stream)
 {
-	int ret;
 	struct sprd_vbc_stream_startup_shutdown shutdown_info;
+	bool shared = dsp_shared_capture(scene_id, stream);
+	int ret;
 
 	if (!vbc_codec)
 		return;
-	ret = pm_runtime_get_sync(vbc_codec->codec->dev);
-	if (ret < 0) {
-		pr_err("%s, agdsp_access_enable failed!\n", __func__);
-		return;
+	if (shared) {
+		mutex_lock(&vbc_codec->capture_scene_mutex);
+		if (!vbc_codec->capture_scene_users ||
+		    vbc_codec->capture_scene != scene_id)
+			goto out;
 	}
-	memset(&shutdown_info, 0,
-	       sizeof(struct sprd_vbc_stream_startup_shutdown));
+	ret = pm_runtime_resume_and_get(vbc_codec->codec->dev);
+	if (ret < 0)
+		goto out;
+	memset(&shutdown_info, 0, sizeof(shutdown_info));
 	fill_dsp_shutdown_data(vbc_codec, scene_id, stream, &shutdown_info);
 	ret = vbc_dsp_func_shutdown(scene_id, stream, &shutdown_info);
-	if (ret < 0) {
-		pm_runtime_mark_last_busy(vbc_codec->codec->dev);
-		pm_runtime_put_autosuspend(vbc_codec->codec->dev);
-		return;
-	}
 	pm_runtime_mark_last_busy(vbc_codec->codec->dev);
 	pm_runtime_put_autosuspend(vbc_codec->codec->dev);
+	/* An unacknowledged shutdown must not admit a new conflicting scene. */
+	if (shared && ret >= 0)
+		vbc_codec->capture_scene_users--;
+out:
+	if (shared)
+		mutex_unlock(&vbc_codec->capture_scene_mutex);
 }
 
 static int rate_to_src_mode(unsigned int rate)

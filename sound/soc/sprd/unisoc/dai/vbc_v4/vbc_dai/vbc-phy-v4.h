@@ -1557,6 +1557,10 @@ struct vbc_codec_priv {
 	struct snd_soc_component *codec;
 	struct vbc_profile vbc_profile_setting;
 	struct mutex load_mutex;
+	/* Normal, Bluetooth, FM and VAD DSP capture share MCDT ADC4. */
+	struct mutex capture_scene_mutex;
+	int capture_scene;
+	unsigned int capture_scene_users;
 	struct vbc_mute_dg_para mdg[VBC_MDG_MAX];
 	int32_t src_fs[VBC_SRC_MAX];
 	struct vbc_dg_para dg[VBC_DG_MAX];
