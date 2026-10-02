@@ -75,6 +75,9 @@
 #define PULL_UP_MASK			0x21
 #define PULL_UP_SHIFT			7
 
+#define QOGIR_PULL_UP_MASK		0x43
+#define QOGIR_PULL_UP_SHIFT		6
+
 #define INPUT_SCHMITT			BIT(11)
 #define INPUT_SCHMITT_MASK		0x1
 #define INPUT_SCHMITT_SHIFT		11
@@ -153,6 +156,9 @@ struct sprd_pinctrl {
 	struct pinctrl_dev *pctl;
 	void __iomem *base;
 	struct sprd_pinctrl_soc_info *info;
+	u32 common_offset;
+	u32 misc_offset;
+	bool qogir_pull;
 };
 
 #define SPRD_PIN_CONFIG_CONTROL		(PIN_CONFIG_END + 1)
@@ -479,17 +485,24 @@ static int sprd_pinconf_get(struct pinctrl_dev *pctldev, unsigned int pin_id,
 		case PIN_CONFIG_BIAS_PULL_DOWN:
 			/* combine sleep pull down and pull down config */
 			arg = ((reg >> SLEEP_PULL_DOWN_SHIFT) &
-			       SLEEP_PULL_DOWN_MASK) << 16;
-			arg |= (reg >> PULL_DOWN_SHIFT) & PULL_DOWN_MASK;
+			       (pctl->qogir_pull ? 3 : SLEEP_PULL_DOWN_MASK)) << 16;
+			arg |= (reg >> PULL_DOWN_SHIFT) &
+			       (pctl->qogir_pull ? 3 : PULL_DOWN_MASK);
 			break;
 		case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
 			arg = (reg >> INPUT_SCHMITT_SHIFT) & INPUT_SCHMITT_MASK;
 			break;
 		case PIN_CONFIG_BIAS_PULL_UP:
 			/* combine sleep pull up and pull up config */
-			arg = ((reg >> SLEEP_PULL_UP_SHIFT) &
-			       SLEEP_PULL_UP_MASK) << 16;
-			arg |= (reg >> PULL_UP_SHIFT) & PULL_UP_MASK;
+			if (pctl->qogir_pull) {
+				arg = ((reg >> 2) & 3) << 16;
+				arg |= (reg >> QOGIR_PULL_UP_SHIFT) &
+				       QOGIR_PULL_UP_MASK;
+			} else {
+				arg = ((reg >> SLEEP_PULL_UP_SHIFT) &
+				       SLEEP_PULL_UP_MASK) << 16;
+				arg |= (reg >> PULL_UP_SHIFT) & PULL_UP_MASK;
+			}
 			break;
 		case PIN_CONFIG_BIAS_DISABLE:
 			if ((reg & (SLEEP_PULL_DOWN | SLEEP_PULL_UP)) ||
@@ -668,11 +681,11 @@ static int sprd_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin_id,
 			case PIN_CONFIG_BIAS_PULL_DOWN:
 				if (is_sleep_config == true) {
 					val |= SLEEP_PULL_DOWN;
-					mask = SLEEP_PULL_DOWN_MASK;
+					mask = pctl->qogir_pull ? 3 : SLEEP_PULL_DOWN_MASK;
 					shift = SLEEP_PULL_DOWN_SHIFT;
 				} else {
 					val |= PULL_DOWN;
-					mask = PULL_DOWN_MASK;
+					mask = pctl->qogir_pull ? 3 : PULL_DOWN_MASK;
 					shift = PULL_DOWN_SHIFT;
 				}
 				break;
@@ -688,16 +701,34 @@ static int sprd_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin_id,
 			case PIN_CONFIG_BIAS_PULL_UP:
 				if (is_sleep_config) {
 					val |= SLEEP_PULL_UP;
-					mask = SLEEP_PULL_UP_MASK;
-					shift = SLEEP_PULL_UP_SHIFT;
+					mask = pctl->qogir_pull ? 3 : SLEEP_PULL_UP_MASK;
+					shift = pctl->qogir_pull ? 2 : SLEEP_PULL_UP_SHIFT;
 				} else {
-					if (arg == 20000)
-						val |= PULL_UP_20K;
-					else if (arg == 4700)
-						val |= PULL_UP_4_7K;
+					if (pctl->qogir_pull) {
+						switch (arg) {
+						case 1:
+							val = BIT(7);
+							break;
+						case 2:
+							val = BIT(12);
+							break;
+						case 3:
+							val = BIT(7) | BIT(12);
+							break;
+						default:
+							return -EINVAL;
+						}
+						mask = QOGIR_PULL_UP_MASK;
+						shift = QOGIR_PULL_UP_SHIFT;
+					} else {
+						if (arg == 20000)
+							val |= PULL_UP_20K;
+						else if (arg == 4700)
+							val |= PULL_UP_4_7K;
 
-					mask = PULL_UP_MASK;
-					shift = PULL_UP_SHIFT;
+						mask = PULL_UP_MASK;
+						shift = PULL_UP_SHIFT;
+					}
 				}
 				break;
 			case PIN_CONFIG_BIAS_DISABLE:
@@ -1013,12 +1044,12 @@ static int sprd_pinctrl_add_pins(struct sprd_pinctrl *sprd_pctl,
 			ctrl_pin++;
 		} else if (pin->type == COMMON_PIN) {
 			pin->reg = (unsigned long)sprd_pctl->base +
-				PINCTRL_REG_OFFSET + PINCTRL_REG_LEN *
+				sprd_pctl->common_offset + PINCTRL_REG_LEN *
 				(i - ctrl_pin);
 			com_pin++;
 		} else if (pin->type == MISC_PIN) {
 			pin->reg = (unsigned long)sprd_pctl->base +
-				PINCTRL_REG_MISC_OFFSET + PINCTRL_REG_LEN *
+				sprd_pctl->misc_offset + PINCTRL_REG_LEN *
 				(i - ctrl_pin - com_pin);
 		}
 	}
@@ -1033,9 +1064,10 @@ static int sprd_pinctrl_add_pins(struct sprd_pinctrl *sprd_pctl,
 	return 0;
 }
 
-int sprd_pinctrl_core_probe(struct platform_device *pdev,
-			    struct sprd_pins_info *sprd_soc_pin_info,
-			    int pins_cnt)
+int sprd_pinctrl_core_probe_ext(struct platform_device *pdev,
+				struct sprd_pins_info *sprd_soc_pin_info,
+				int pins_cnt, u32 common_offset,
+				u32 misc_offset, bool qogir_pull)
 {
 	struct sprd_pinctrl *sprd_pctl;
 	struct sprd_pinctrl_soc_info *pinctrl_info;
@@ -1059,6 +1091,9 @@ int sprd_pinctrl_core_probe(struct platform_device *pdev,
 
 	sprd_pctl->info = pinctrl_info;
 	sprd_pctl->dev = &pdev->dev;
+	sprd_pctl->common_offset = common_offset;
+	sprd_pctl->misc_offset = misc_offset;
+	sprd_pctl->qogir_pull = qogir_pull;
 	platform_set_drvdata(pdev, sprd_pctl);
 
 	ret = sprd_pinctrl_add_pins(sprd_pctl, sprd_soc_pin_info, pins_cnt);
@@ -1098,6 +1133,15 @@ int sprd_pinctrl_core_probe(struct platform_device *pdev,
 	}
 
 	return 0;
+}
+EXPORT_SYMBOL_GPL(sprd_pinctrl_core_probe_ext);
+
+int sprd_pinctrl_core_probe(struct platform_device *pdev,
+			    struct sprd_pins_info *pins, int count)
+{
+	return sprd_pinctrl_core_probe_ext(pdev, pins, count,
+					   PINCTRL_REG_OFFSET,
+					   PINCTRL_REG_MISC_OFFSET, false);
 }
 EXPORT_SYMBOL_GPL(sprd_pinctrl_core_probe);
 
