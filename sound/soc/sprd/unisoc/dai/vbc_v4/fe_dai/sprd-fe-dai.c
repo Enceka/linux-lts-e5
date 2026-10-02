@@ -847,6 +847,9 @@ static int fe_hw_params(struct snd_pcm_substream *substream,
 		fe_dai_id_to_str(fe_dai->id),
 		fe_dai->id, stream_to_str(substream->stream));
 
+	/* Failed setup must not inherit ownership from an earlier stream. */
+	snd_soc_dai_set_dma_data(fe_dai, substream, NULL);
+
 	ret = pm_runtime_get_sync(fe_dai->dev);
 	if (ret < 0) {
 		pr_err("%s, agdsp_access_enable failed!\n", __func__);
@@ -897,12 +900,16 @@ static int fe_hw_free(struct snd_pcm_substream *substream,
 	pr_info("%s fe dai: %s(%d) %s\n", __func__,
 		fe_dai_id_to_str(fe_dai->id),
 		fe_dai->id, stream_to_str(substream->stream));
+	/* Only a successfully configured FE owns an MCDT allocation. */
+	if (!snd_soc_dai_get_dma_data(fe_dai, substream))
+		return 0;
 	ret = pm_runtime_get_sync(fe_dai->dev);
 	if (ret < 0) {
 		pr_err("%s, agdsp_access_enable failed!\n", __func__);
 		return ret;
 	}
 	mcdt_dma_deinit(fe_dai, substream->stream);
+	snd_soc_dai_set_dma_data(fe_dai, substream, NULL);
 	pm_runtime_mark_last_busy(fe_dai->dev);
 	pm_runtime_put_autosuspend(fe_dai->dev);
 
