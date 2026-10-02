@@ -19,3 +19,12 @@ config PINCTRL_SPRD_SC9860
 	select PINCTRL_SPRD
 	help
 	  Say Y here to enable Spreadtrum SC9860 pinctrl driver
+
+config PINCTRL_SPRD_QOGIRN6LITE
+	tristate "Unisoc QogirN6Lite pinctrl driver"
+	depends on OF
+	depends on ARCH_SPRD || COMPILE_TEST
+	select PINCTRL_SPRD
+	help
+	  Enable the UMS9621/QogirN6Lite pad and peripheral matrix controller.
+	  This includes the IIS matrix used for Bluetooth SCO audio.
